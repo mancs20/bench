@@ -16,7 +16,7 @@ set -x # useful for debugging.
 CHOCO_WORKFLOW_PATH=$(dirname "$(realpath "run.sh")")
 BENCHMARKING_DIR_PATH="$CHOCO_WORKFLOW_PATH/../.."
 BENCHMARKS_DIR_PATH="$CHOCO_WORKFLOW_PATH/../../.."
-FRONT_GENERATION_PATH=$(dirname "$(realpath "run.sh")")
+FRONT_GENERATION_PATH="$CHOCO_WORKFLOW_PATH/front-generators"
 
 # Configure the environment.
 if [ -z "$1" ]; then
@@ -25,6 +25,7 @@ if [ -z "$1" ]; then
   exit 1
 fi
 source $1
+source "${BENCHMARKS_DIR_PATH}"/../pybench/bin/activate
 
 # If it has an argument, we retry the jobs that failed on a previous run.
 # If the experiments were not complete, you can simply rerun the script, parallel will ignore the jobs that are already done.
@@ -35,7 +36,7 @@ fi
 
 # I. Define the campaign to run.
 
-TIMEOUT=1200000
+TIMEOUT=3600
 CORES=1 # The number of core used on the node.
 THREADS=1 # The number of threads used by the solver.
 MACHINE=$(basename "$1" ".sh")
@@ -61,7 +62,7 @@ else
   NUM_PARALLEL_EXPERIMENTS=1
 fi
 
-DUMP_PY_PATH="$MZN_WORKFLOW_PATH/dump.py"
+DUMP_PY_PATH="$CHOCO_WORKFLOW_PATH/dump.py"
 
 # For replicability.
 cp -r "$CHOCO_WORKFLOW_PATH" "$OUTPUT_DIR/"
@@ -74,5 +75,4 @@ lshw -json > "$OUTPUT_DIR/$(basename "$CHOCO_WORKFLOW_PATH")/hardware-$MACHINE".
 # The `parallel` command spawns one `srun` command per experiment, which executes the minizinc solver with the right resources.
 
 COMMANDS_LOG="$OUTPUT_DIR/$(basename "$CHOCO_WORKFLOW_PATH")/jobs.log"
-#parallel --verbose --no-run-if-empty --rpl '{} uq()' -k --colsep ',' --skip-first-line -j $NUM_PARALLEL_EXPERIMENTS --resume --joblog $COMMANDS_LOG $SRUN_COMMAND $CHOCO_MO_JAR_COMMAND {1} {2} {3} {4} $SEARCH_STRATEGY $TIMEOUT {5} '2>&1' '|' python3 DUMP_PY_PATH $OUTPUT_DIR {1} {2} {3} {5} $SOLVER $VERSION $CORES $THREADS $TIMEOUT $MEM_GB_PER_XP :::: $INSTANCES_PATH :::: $FRONT_GENERATION_PATH
-parallel --verbose --no-run-if-empty --rpl '{} uq()' -k --colsep ',' --skip-first-line -j $NUM_PARALLEL_EXPERIMENTS --resume --joblog "$COMMANDS_LOG" $SRUN_COMMAND $CHOCO_MO_JAR_COMMAND {1} {2} {3} {4} $SEARCH_STRATEGY $TIMEOUT {5} '2>&1' '|' python3 DUMP_PY_PATH "$OUTPUT_DIR" {1} {2} {3} {5} $SOLVER $VERSION $CORES $THREADS $TIMEOUT $MEM_GB_PER_XP :::: "$INSTANCES_PATH" :::: "$FRONT_GENERATION_PATH"
+parallel --verbose --no-run-if-empty --rpl '{} uq()' -k --colsep ',' --skip-first-line -j $NUM_PARALLEL_EXPERIMENTS --resume --joblog "$COMMANDS_LOG" $SRUN_COMMAND $CHOCO_MO_JAR_COMMAND {1} {2} {3} "$BENCHMARKING_DIR_PATH"/{4} $SEARCH_STRATEGY $TIMEOUT {5} '2>&1' '|' python3 "$DUMP_PY_PATH" "$OUTPUT_DIR" {1} {2} {3} {5} $SOLVER $VERSION $CORES $THREADS $TIMEOUT $MEM_GB_PER_XP :::: "$INSTANCES_PATH" :::: "$FRONT_GENERATION_PATH"
