@@ -51,7 +51,7 @@ SEARCH_STRATEGY="default"
 CHOCO_MO_JAR_COMMAND="java -Xmx${MEM_GB_PER_XP}g -jar choco-mo.jar"
 #ACE_OPTIONS="-t=$TIMEOUT -npc=True -ev" # be careful, in ACE the options must be situed after the instance file.
 CHOCO_MO_JAR_OPTIONS="" # be careful, in ACE the options must be situed after the instance file.
-OUTPUT_DIR="$BENCHMARKS_DIR_PATH/campaign/$MACHINE/$SOLVER-$VERSION"
+OUTPUT_DIR="$BENCHMARKS_DIR_PATH/campaign/$MACHINE/mo/$SOLVER-$VERSION"
 mkdir -p "$OUTPUT_DIR"
 
 # If we are on the HPC, we encapsulate the command in a srun command to reserve the resources needed.

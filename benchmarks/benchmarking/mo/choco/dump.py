@@ -35,8 +35,8 @@ if __name__ == "__main__":
       if extras[-1].startswith("-"):
         extras[-1] = extras[-1][1:]
 
-  uid = (solver.replace('.', '-') + solver_version.replace('.', '-') + "_" + front_generator
-         + "_" + instance_name)
+  uid = (solver.replace('.', '-') + solver_version.replace('.', '-') + "_" + problem
+         + "_" + benchmark + "_" + instance_name + "_" + front_generator)
   if cores != "1" or threads != "1":
     uid += f"_{cores}cores_{threads}threads"
   if len(extras) > 0:
@@ -50,18 +50,17 @@ if __name__ == "__main__":
   log_filename = Path(output_dir + "/" + uid + ".json")
 
   stat_base = {
-    "configuration": uid,
     "benchmark": benchmark,
     "problem": problem,
     "instance": instance_name,
     "solver": solver,
     "solver_version": solver_version,
-    "front_generator": front_generator,
-    "exhaustive": "false",
     "datetime": datetime.datetime.now().isoformat(),
+    "front_generator": front_generator,
+    "timeout": timeout,
     "cores": cores,
     "threads": threads,
-    "timeout": timeout,
+    "mem": mem,
   }
 
   # If the file exists, we do not delete what is already inside but append new content.
