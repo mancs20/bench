@@ -47,8 +47,8 @@ def get_solutions_in_time_for_choco(solver_messages):
 
 
 def extract_times_choco(message):
-    building_time = float(re.search(r'Building time\s*:\s*([\d.]+)s', message).group(1))
-    resolution_time = float(re.search(r'Resolution time\s*:\s*([\d.]+)s', message).group(1))
+    building_time = float(re.search(r'Building time\s*:\s*([\d,.]+)s', message).group(1).replace(',', ''))
+    resolution_time = float(re.search(r'Resolution time\s*:\s*([\d,.]+)s', message).group(1).replace(',', ''))
     return building_time, resolution_time
 
 
@@ -69,6 +69,7 @@ if __name__ == "__main__":
     json_objects = []
     current_json_mo_solution_details = {}
     unknowns = []
+    exceptions = []
     errors = []
     statistics = {}
 
@@ -81,7 +82,7 @@ if __name__ == "__main__":
             if output["type"] == "lattice-land":
                 if output["lattice-land"] == "start":
                     statistics = {}
-                    unknowns = []
+                    exceptions = []
                     errors = []
                     current_json_mo_solution_details = {}
             elif output["type"] == "statistics":
@@ -90,8 +91,15 @@ if __name__ == "__main__":
                 current_json_mo_solution_details.update(output["solutions-details"])
             elif output["type"] == "error":
                 errors += line
-        else:
-            unknowns.append(line)
+        elif "exception" in line.lower():
+            exceptions.append(line)
+
+    if errors != [] or exceptions != []:
+        print(f"Error in {sys.argv[2]}", file=sys.stderr)
+        for error in errors:
+            print(error, file=sys.stderr)
+        for exception in exceptions:
+            print(exception, file=sys.stderr)
 
     statistics_fields = list(statistics.keys())
     solution_details_fields = list(current_json_mo_solution_details.keys())
@@ -100,56 +108,53 @@ if __name__ == "__main__":
 
     filtered_data = {}
     solutions_in_time = []
+    front_metrics = {}
     if statistics:
         filtered_data = OrderedDict({field: statistics.get(field, None) for field in statistics_fields})
-        # filtered_data = {field: statistics.get(field, None) for field in statistics_fields}
     if current_json_mo_solution_details:
+        if 'pareto_front' in current_json_mo_solution_details:
+            if "reference_point" in current_json_mo_solution_details:
+                reference_point = current_json_mo_solution_details.get("reference_point", None)
+                current_json_mo_solution_details.pop("reference_point")
+                hypervolume = calculate_hypervolume(np.array(current_json_mo_solution_details.get('pareto_front')), np.array(reference_point))
+                front_metrics.update({"hypervolume": hypervolume})
+                front = current_json_mo_solution_details.get('pareto_front')
+                front_metrics.update({"front_cardinality": len(front)})
+                # calculate hypervolume evolution
+                hypervolume_evolution = [0] * len(front)
+                temp_front = []
+                for index, point in enumerate(front):
+                    temp_front.append(point)
+                    hypervolume_evolution[index] = calculate_hypervolume(np.array(temp_front),
+                                                                         np.array(reference_point))
+                front_metrics.update({"hypervolume_evolution": hypervolume_evolution})
+        front_metrics["solutions_in_time"] = "Not available."
         if "solver_messages" in current_json_mo_solution_details:
             if "choco" in statistics["solver"]:
                 solutions_in_time = get_solutions_in_time_for_choco(current_json_mo_solution_details["solver_messages"])
+                front_metrics["solutions_in_time"] = solutions_in_time
             current_json_mo_solution_details.pop("solver_messages")
-        if "reference_point" in current_json_mo_solution_details:
-            reference_point = current_json_mo_solution_details.get("reference_point", None)
-            current_json_mo_solution_details.pop("reference_point")
-        else:
-            reference_point = None
-            print("No reference_point found in the solutions_details. Impossible to calculate hypervolume.")
         filtered_data.update({field: current_json_mo_solution_details.get(field, None) for field
                               in solution_details_fields})
-    all_fields = list(filtered_data.keys())
+        filtered_data.update(front_metrics)
+        all_fields = list(filtered_data.keys())
 
-    # extra multi-objective metrics
-    new_fields = ['hypervolume', 'front_cardinality', 'hypervolume_evolution', 'solutions_in_time']
-    all_fields.extend(new_fields)
-    hypervolume = calculate_hypervolume(np.array(filtered_data['pareto_front']), np.array(reference_point))
-    front_cardinality = len(filtered_data['pareto_front'])
+        output_file_exists = os.path.isfile(sol_stats_filename)
+        existing_data = []
+        if output_file_exists:
+            with open(sol_stats_filename, 'r', newline='') as csvfile:
+                reader = csv.DictReader(csvfile)
+                existing_data = [row for row in reader]
+                existing_headers = reader.fieldnames
+                headers = existing_headers + [field for field in all_fields if field not in existing_headers]
+        else:
+            headers = all_fields
 
-    # calculate hypervolume evolution
-    front = filtered_data['pareto_front']
-    hypervolume_evolution = [0] * len(front)
-    temp_front = []
-    for index, point in enumerate(front):
-        temp_front.append(point)
-        hypervolume_evolution[index] = calculate_hypervolume(np.array(temp_front), np.array(reference_point))
-    filtered_data.update({'hypervolume': hypervolume, 'front_cardinality': front_cardinality,
-                          'hypervolume_evolution': hypervolume_evolution, 'solutions_in_time': solutions_in_time})
+        with open(sol_stats_filename, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=headers)
+            writer.writeheader()
 
-    output_file_exists = os.path.isfile(sol_stats_filename)
-    existing_data = []
-    if output_file_exists:
-        with open(sol_stats_filename, 'r', newline='') as csvfile:
-            reader = csv.DictReader(csvfile)
-            existing_data = [row for row in reader]
-            existing_headers = reader.fieldnames
-            headers = existing_headers + [field for field in all_fields if field not in existing_headers]
-    else:
-        headers = all_fields
-
-    with open(sol_stats_filename, 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=headers)
-        writer.writeheader()
-
-        if existing_data:
-            for row in existing_data:
-                writer.writerow(row)
-        writer.writerow(filtered_data)
+            if existing_data:
+                for row in existing_data:
+                    writer.writerow(row)
+            writer.writerow(filtered_data)
