@@ -1,8 +1,9 @@
+import ast
+
 import pandas as pd
 import seaborn as sns
 import numpy as np  # Needed for log transformation
 import matplotlib.pyplot as plt
-from matplotlib.ticker import AutoMinorLocator
 from matplotlib.lines import Line2D
 import os
 
@@ -13,7 +14,7 @@ class MoAnalysis:
                  hypervolume='hypervolume', pareto_front='pareto_front',
                  hypervolume_evolution='hypervolume_evolution', number_of_solutions='front_cardinality',
                  exhaustive='exhaustive', time='time(s)', solutions_in_time='solutions_in_time',
-                 time_solver_sec=None, pareto_solutions_time_list=None):
+                 time_solver_sec=None, pareto_solutions_time_list=None, all_solutions=None):
         self.hypervolume = hypervolume
         self.instance = instance
         self.solver_name = solver_name
@@ -33,7 +34,10 @@ class MoAnalysis:
             self.pareto_solutions_time_list = solutions_in_time
         else:
             self.pareto_solutions_time_list = pareto_solutions_time_list
-
+        if all_solutions is None:
+            self.all_solutions = pareto_front
+        else:
+            self.all_solutions = all_solutions
 
     @staticmethod
     def csv_to_df(file_path):
@@ -41,48 +45,55 @@ class MoAnalysis:
         return df
 
     # Function to calculate score for each front_strategy
-    def calculate_score(self, group):
-        # best_hypervolume = group.loc[group[self.hypervolume].idxmax(), self.hypervolume]
-        # group['score'] = group[self.hypervolume] / best_hypervolume
-        # return group
+    def calculate_hypervolume_score(self, group):
         best_hypervolume = group[self.hypervolume].max()
         group['score'] = group[self.hypervolume] / best_hypervolume
         return group
 
     def plot_hypervolume_best(self, df):
-        # Apply the function to calculate scores
-        df_score_by_front_strategy = df.groupby([self.instance, self.solver_name]).apply(self.calculate_score)
-        # df_score_by_front_strategy = df.groupby([self.instance, self.solver_name]).apply(calculate_score)
-        # df_score_by_front_strategy =  df_score_by_front_strategy.drop(columns=self.solver_name)
+        # Calculate hypervolume scores and reset index
+        df_score_by_front_strategy = df.groupby([self.instance, self.solver_name]).apply(
+            self.calculate_hypervolume_score).reset_index(drop=True)
 
-        df_total_front_by_solver = df.groupby([self.solver_name, self.front_strategy])[self.instance].count()
+        # Calculate total fronts by solver
+        df_total_front_by_solver = df.groupby([self.solver_name, self.front_strategy])[
+            self.instance].count().reset_index()
+
+        # Calculate the best fronts by solver
         df_best_front_by_solver1 = df_score_by_front_strategy[df_score_by_front_strategy['score'] == 1.0].groupby(
-            [self.solver_name, self.front_strategy]).size().rename('best').to_frame()
+            [self.solver_name, self.front_strategy]).size().rename('best').to_frame().reset_index()
+
         df_best_front_by_solver = df_score_by_front_strategy.groupby(
             [self.solver_name, self.front_strategy]).size().rename(
-            'best').to_frame()
-        df_best_front_by_solver['best'] = df_best_front_by_solver1['best'].astype(int)
-        # replace NaN values with 0 and convert to int
-        df_best_front_by_solver['best'] = df_best_front_by_solver['best'].fillna(0).astype(int)
-        df_avg_score_by_front_strategy = df_score_by_front_strategy.groupby([self.solver_name, self.front_strategy])[
-            'score'].mean().rename('average_score').to_frame()
+            'best').to_frame().reset_index()
 
-        df_total_best = pd.merge(df_total_front_by_solver, df_best_front_by_solver, left_index=True, right_index=True)
-        # add a column with the average score for each front strategy
-        df_total_best_avg_score = pd.merge(df_total_best, df_avg_score_by_front_strategy, left_index=True,
-                                           right_index=True)
+        # Merge to align indices properly
+        df_best_front_by_solver = pd.merge(df_best_front_by_solver, df_best_front_by_solver1,
+                                           on=[self.solver_name, self.front_strategy], how='left',
+                                           suffixes=('', '_new'))
+
+        df_best_front_by_solver['best'] = df_best_front_by_solver['best_new'].fillna(0).astype(int)
+        df_best_front_by_solver = df_best_front_by_solver.drop(columns='best_new')
+
+        # Calculate average scores by front strategy
+        df_avg_score_by_front_strategy = df_score_by_front_strategy.groupby([self.solver_name, self.front_strategy])[
+            'score'].mean().rename('average_score').to_frame().reset_index()
+
+        # Merge dataframes to get total best and average scores
+        df_total_best = pd.merge(df_total_front_by_solver, df_best_front_by_solver,
+                                 on=[self.solver_name, self.front_strategy])
+        df_total_best_avg_score = pd.merge(df_total_best, df_avg_score_by_front_strategy,
+                                           on=[self.solver_name, self.front_strategy])
+
         print(df_total_best_avg_score)
 
         # Plotting
         fig = plt.figure(figsize=(12, 6))
-        # Adding text labels on top of bars
-        ax = sns.barplot(x=df_total_best_avg_score.index.get_level_values(self.solver_name), y='best',
-                         hue=df_total_best_avg_score.index.get_level_values(self.front_strategy),
-                         data=df_total_best_avg_score)
+        ax = sns.barplot(x=self.solver_name, y='best', hue=self.front_strategy, data=df_total_best_avg_score)
+
         for p in ax.containers:
             ax.bar_label(p, label_type='edge')
 
-        # Adding labels and legend
         plt.title('Times each strategy was the best')
         plt.xlabel('Solver Name')
         plt.ylabel('Times best')
@@ -90,12 +101,43 @@ class MoAnalysis:
         plt.show()
         return df_total_best_avg_score, fig
 
+    def plot_hypervolume_score_per_instance(self, df):
+        # Set up the plot
+        fig = plt.figure(figsize=(10, 20))
+        sns.set_theme(style="whitegrid")
+
+        # Create a color palette for front_strategy
+        palette = sns.color_palette("husl", len(df[self.front_strategy].unique()))
+
+        # Calculate scores
+        df_score_by_front_strategy = df.groupby([self.instance, self.solver_name]).apply(
+            self.calculate_hypervolume_score).reset_index(drop=True)
+
+        # Get average scores for plotting
+        df_avg_score_by_front_strategy = df_score_by_front_strategy.groupby([self.instance, self.front_strategy])[
+            'score'].mean().reset_index()
+
+        # Plot hypervolume scores
+        ax = sns.barplot(x='score', y=self.instance, hue=self.front_strategy, data=df_avg_score_by_front_strategy,
+                         palette=palette, orient='h')
+
+        plt.title('Hypervolume Score by Front Strategy for Each Instance')
+        plt.xlabel('Score')
+        plt.ylabel(self.instance)
+        plt.legend(title='Front Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+
+        # Set the background to white and remove the grid lines
+        sns.despine(left=True, bottom=True)
+        ax.grid(False)
+        plt.show()
+        return fig
+
     def plot_hypervolume_best_average(self, df_total_best_avg_score):
         # Create the second graph
         fig = plt.figure(figsize=(12, 6))
-        ax = sns.barplot(x=df_total_best_avg_score.index.get_level_values(self.solver_name), y='average_score',
-                         hue=df_total_best_avg_score.index.get_level_values(self.front_strategy),
-                         data=df_total_best_avg_score)
+        ax = sns.barplot(x=self.solver_name, y='average_score',
+                         hue=self.front_strategy, data=df_total_best_avg_score)
+
         for p in ax.containers:
             ax.bar_label(p, label_type='edge')
 
@@ -108,27 +150,6 @@ class MoAnalysis:
         return fig
 
     # Plot the time and the number of solutions for each instance
-    # todo delete after test
-    def get_time_number_solutions1(self, df):
-        # Apply the function to calculate scores
-        # df_time_number_solutions = df.groupby([self.instance]).apply(self.calculate_number_of_solutions_score,
-        #                                                              include_groups=False)
-        df_time_number_solutions = df.groupby([self.instance]).apply(self.calculate_number_of_solutions_score,)
-
-        # df_time = df.groupby([self.instance]).apply(self.calculate_time_score, include_groups=False)
-        df_time = df.groupby([self.instance]).apply(self.calculate_time_score)
-        df_time_number_solutions['time_score'] = df_time['time_score']
-
-        # df_solver_front = df.groupby([self.instance]).apply(self.merge_solver_front_strategy_names,
-        #                                                     include_groups=False)
-        df_solver_front = df.groupby([self.instance]).apply(self.merge_solver_front_strategy_names)
-        df_time_number_solutions['solver_front_strategy'] = df_solver_front['solver_front_strategy']
-
-        df_time_number_solutions = df_time_number_solutions[['solver_front_strategy', 'time_score', self.time_solver_sec,
-                                                             'number_of_solutions_score', self.number_of_solutions,
-                                                             self.exhaustive]]
-        return df_time_number_solutions
-
     def get_time_number_solutions(self, df):
         # Apply the function to calculate scores
         df_time_number_solutions = df.groupby([self.instance]).apply(
@@ -259,7 +280,7 @@ class MoAnalysis:
         return figs
 
     # Plot hypervolume vs time
-    def plot_hypervolume_vs_time(self, df, instances_list, figs):
+    def plot_hypervolume_vs_time(self, df, instances_list, figs, zoom_in_y=False):
         df_copy = df.copy()
         df_copy['solver_strategy'] = df_copy[[self.solver_name, self.front_strategy]].agg(' '.join, axis=1)
 
@@ -275,11 +296,47 @@ class MoAnalysis:
             plt.show()
             figs.append(fig)
 
-            # Plot 2: Logarithmic Scale
+            if zoom_in_y:
+                # Plot 2: Logarithmic Scale
+                fig, ax = plt.subplots(figsize=(10, 5))
+                self.plot_data(filtered_df, ax, instance_to_process, zoom_in_y=True)
+                ax.set_xlabel('Time(s)')
+                ax.set_ylabel('Log of Hypervolume')
+                ax.legend(title='Solver Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+                plt.show()
+                figs.append(fig)
+
+        return figs
+
+    def plot_fronts(self, df, instances_list, figs):
+        df_copy = df.copy()
+        df_copy['solver_strategy'] = df_copy[[self.solver_name, self.front_strategy]].agg(' '.join, axis=1)
+
+        for instance_to_process in instances_list:
+            filtered_df = df_copy[df_copy[self.instance] == instance_to_process]
+
             fig, ax = plt.subplots(figsize=(10, 5))
-            self.plot_data(filtered_df, ax, instance_to_process, zoom_in_y=True)
-            ax.set_xlabel('Time(s)')
-            ax.set_ylabel('Log of Hypervolume')
+
+            for _, row in filtered_df.iterrows():
+                solver_strategy = row['solver_strategy']
+                pareto_front_str = row[self.pareto_front]
+
+                # Parse the pareto_front field
+                if pareto_front_str.startswith('{') and pareto_front_str.endswith('}'):
+                    pareto_front_str = pareto_front_str.replace('{', '[').replace('}', ']')
+
+                try:
+                    pareto_front = ast.literal_eval(pareto_front_str)
+                except (SyntaxError, ValueError) as e:
+                    print(f"Error parsing pareto_front for {solver_strategy}: {e}")
+                    continue
+
+                pareto_front = np.array(pareto_front)
+                ax.scatter(pareto_front[:, 0], pareto_front[:, 1], label=solver_strategy)
+
+            ax.set_xlabel('Objective 1')
+            ax.set_ylabel('Objective 2')
+            ax.set_title(f'Pareto Fronts for Instance {instance_to_process}')
             ax.legend(title='Solver Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
             plt.show()
             figs.append(fig)
@@ -298,20 +355,17 @@ class MoAnalysis:
                 # Process the solutions time list and pareto times
                 x_all_times = [float(time) for time in
                                row[self.solutions_in_time].replace('[', '').replace(']', '').split(',')]
-                all_solutions_string = row['all_solutions']
+                all_solutions_string = row[self.all_solutions]
                 # check if it has the string "Unfeasible"
                 if "Unfeasible" in all_solutions_string:
                     # remove the "Unfeasible" string from the all_solutions_string
                     all_solutions_string = all_solutions_string.replace(',Unfeasible', '')
                     all_solutions_string = all_solutions_string.replace('Unfeasible,', '')
-                all_solutions = all_solutions_string.replace('{', '').replace('}', '').split('],[')
-                # print(f'all_solutions for {combination}: {all_solutions} has a length of {len(all_solutions)}')
-                # remove from x_all_times the times where all_solutions is equal to "Unfeasible"
-                x_all_times = [x_all_times[i] for i in range(len(all_solutions)) if "Unfeasible" != all_solutions[i]]
-                # print(f'x_all_times for {combination}: {x_all_times} has a length of {len(x_all_times)}')
+                all_solutions = all_solutions_string.replace(' ', '').split('],[')
+                x_all_times = [x_all_times[i] for i in range(len(all_solutions)) if
+                               "Unfeasible" not in all_solutions[i]]
                 hypervolumes = [float(hv) for hv in
                                 row[self.hypervolume_evolution].replace('[', '').replace(']', '').split(',')]
-                # print(f'hypervolumes for {combination}: {hypervolumes} has a length of {len(hypervolumes)}')
 
                 y = hypervolumes
                 x = x_all_times
@@ -323,35 +377,19 @@ class MoAnalysis:
                     y = hypervolumes_pareto
                     x = x_pareto
 
-                # if not consider_only_pareto:# Find indices of x_all_times that correspond to x_pareto
-                #     x_pareto_id = [x_all_times.index(time) for time in x_pareto]
-                #
-                #     # Prepare the y values for plotting, mapping each time in x_all_times to its corresponding hypervolume
-                #     y = []
-                #     last_index = 0  # Track the last index of x_pareto that was used
-                #     for i in range(len(x_all_times)):
-                #         if last_index < len(x_pareto_id) - 1 and i > x_pareto_id[last_index]:
-                #             last_index += 1
-                #         y.append(hypervolumes[last_index])
-                # else:
-                #     y = hypervolumes
-                #     x_all_times = x_pareto
-
                 # for each y value, add it to the all_y_values list
                 all_y_values.extend(y)
                 # Plot the data
                 ax.plot(x_all_times, y, marker='o', linestyle='-', label=combination)
 
         if zoom_in_y:
-            # get the median of all y values
             median_y = np.median(all_y_values)
-            # get the maximum y value
             max_y = max(all_y_values)
-            # based on this median value, set the y-axis limits
-            ax.set_ylim(max_y * 0.99, max_y * 1.01)
+            # reference value can be the max or the median
+            reference_value = max_y
+            # based on the reference value, set the y-axis limits
+            ax.set_ylim(reference_value * 0.99, reference_value * 1.01)
             plt.draw()
-
-        # %%
 
     # save the data as pdf and csv
     @staticmethod
@@ -374,6 +412,8 @@ class MoAnalysis:
         print(f"All images have been saved in the '{folder_name}' folder.")
 
     def print_all_figs_and_tables(self, df, figs):
+        fig = self.plot_hypervolume_score_per_instance(df)
+        figs.append(fig)
         df_total_best_avg_score, fig = self.plot_hypervolume_best(df)
         figs.append(fig)
         figs.append(self.plot_hypervolume_best_average(df_total_best_avg_score))
