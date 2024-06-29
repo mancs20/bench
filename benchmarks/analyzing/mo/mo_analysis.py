@@ -10,11 +10,13 @@ import os
 
 class MoAnalysis:
 
-    def __init__(self, instance='instance', solver_name='solver', front_strategy='front_generator',
+    def __init__(self, benchmark='benchmark', problem='problem',instance='instance', solver_name='solver', front_strategy='front_generator',
                  hypervolume='hypervolume', pareto_front='pareto_front',
                  hypervolume_evolution='hypervolume_evolution', number_of_solutions='front_cardinality',
                  exhaustive='exhaustive', time='time(s)', solutions_in_time='solutions_in_time',
                  time_solver_sec=None, pareto_solutions_time_list=None, all_solutions=None):
+        self.benchmark = benchmark
+        self.problem = problem
         self.hypervolume = hypervolume
         self.instance = instance
         self.solver_name = solver_name
@@ -52,7 +54,7 @@ class MoAnalysis:
 
     def plot_hypervolume_best(self, df):
         # Calculate hypervolume scores and reset index
-        df_score_by_front_strategy = df.groupby([self.instance, self.solver_name]).apply(
+        df_score_by_front_strategy = df.groupby([self.problem, self.instance, self.solver_name]).apply(
             self.calculate_hypervolume_score).reset_index(drop=True)
 
         # Calculate total fronts by solver
@@ -95,7 +97,7 @@ class MoAnalysis:
             ax.bar_label(p, label_type='edge')
 
         plt.title('Times each strategy was the best')
-        plt.xlabel('Solver Name')
+        plt.xlabel('Solver name')
         plt.ylabel('Times best')
         plt.legend(title='Front Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.show()
@@ -110,20 +112,25 @@ class MoAnalysis:
         palette = sns.color_palette("husl", len(df[self.front_strategy].unique()))
 
         # Calculate scores
-        df_score_by_front_strategy = df.groupby([self.instance, self.solver_name]).apply(
+        # todo review the new grouping, it should be benchmark, problem, instance, solver_name
+        df_score_by_front_strategy = df.groupby([self.problem, self.instance, self.solver_name]).apply(
             self.calculate_hypervolume_score).reset_index(drop=True)
 
         # Get average scores for plotting
-        df_avg_score_by_front_strategy = df_score_by_front_strategy.groupby([self.instance, self.front_strategy])[
-            'score'].mean().reset_index()
+        df_avg_score_by_front_strategy = (df_score_by_front_strategy.groupby([self.problem, self.instance,
+                                                                             self.front_strategy])['score'].mean().
+                                          reset_index())
+        df_avg_score_by_front_strategy['problem_instance'] = (
+                df_avg_score_by_front_strategy[self.problem] + ' - ' + df_avg_score_by_front_strategy[self.instance]
+        )
 
         # Plot hypervolume scores
-        ax = sns.barplot(x='score', y=self.instance, hue=self.front_strategy, data=df_avg_score_by_front_strategy,
+        ax = sns.barplot(x='score', y='problem_instance', hue=self.front_strategy, data=df_avg_score_by_front_strategy,
                          palette=palette, orient='h')
 
-        plt.title('Hypervolume Score by Front Strategy for Each Instance')
+        plt.title('Hypervolume score by front strategy for each problem-instance')
         plt.xlabel('Score')
-        plt.ylabel(self.instance)
+        plt.ylabel('Problem-instance')
         plt.legend(title='Front Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
 
         # Set the background to white and remove the grid lines
@@ -152,18 +159,21 @@ class MoAnalysis:
     # Plot the time and the number of solutions for each instance
     def get_time_number_solutions(self, df):
         # Apply the function to calculate scores
-        df_time_number_solutions = df.groupby([self.instance]).apply(
+        df_time_number_solutions = df.groupby([self.problem, self.instance]).apply(
             self.calculate_number_of_solutions_score).reset_index(drop=True)
-        df_time = df.groupby([self.instance]).apply(self.calculate_time_score).reset_index(drop=True)
-        df_solver_front = df.groupby([self.instance]).apply(self.merge_solver_front_strategy_names).reset_index(
+        df_time = df.groupby([self.problem, self.instance, self.solver_name]).apply(self.calculate_time_score).reset_index(drop=True)
+        df_solver_front = df.groupby([self.problem, self.instance, self.solver_name]).apply(self.merge_solver_front_strategy_names).reset_index(
             drop=True)
 
         # Merge the results
         df_time_number_solutions['time_score'] = df_time['time_score']
         df_time_number_solutions['solver_front_strategy'] = df_solver_front['solver_front_strategy']
+        df_time_number_solutions['problem_instance'] = (
+                df_time_number_solutions[self.problem] + ' - ' + df_time_number_solutions[self.instance]
+        )
 
         columns_to_select = [
-            self.instance, 'solver_front_strategy', 'time_score', self.time_solver_sec, 'number_of_solutions_score',
+            'problem_instance', 'solver_front_strategy', 'time_score', self.time_solver_sec, 'number_of_solutions_score',
             self.number_of_solutions, self.exhaustive]
         df_time_number_solutions = df_time_number_solutions[columns_to_select]
 
@@ -196,13 +206,13 @@ class MoAnalysis:
         palette = sns.color_palette("husl", len(df_time_number_solutions['solver_front_strategy'].unique()))
 
         # Plot time scores with a conditional logarithmic x-axis
-        ax = sns.barplot(x='time_score', y=self.instance, hue='solver_front_strategy', data=df_time_number_solutions,
+        ax = sns.barplot(x='time_score', y='problem_instance', hue='solver_front_strategy', data=df_time_number_solutions,
                          palette=palette, orient='h')
 
-        plt.title('Time Score by Solver Front Strategy')
-        plt.xlabel('Time Score')
-        plt.ylabel(self.instance)
-        plt.legend(title='Solver Front Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.title('Time score by solver front strategy')
+        plt.xlabel('Time score')
+        plt.ylabel('problem_instance')
+        plt.legend(title='Solver - Front Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
 
         # Apply a logarithmic scale only for values greater than the threshold
         if df_time_number_solutions['time_score'].max() > log_threshold:
@@ -226,7 +236,7 @@ class MoAnalysis:
         combination_to_y = {comb: i for i, comb in enumerate(unique_combinations)}
 
         for instances in instances_list:
-            filtered_df = df_copy[df_copy[self.instance] == instances]
+            filtered_df = df_copy[df_copy['problem_instance'] == instances]
 
             # Set up the plot
             fig = plt.figure(figsize=(10, 5))
@@ -260,9 +270,9 @@ class MoAnalysis:
             # Step 5: Customize y-axis labels
             plt.yticks(range(len(unique_combinations)), y_ticks_labels)
 
-            plt.xlabel('Solution Time')
-            plt.ylabel('Solver and Strategy Combination')
-            plt.title(f'Comparison of Solution Times by Solver and Strategy for instance {instances}')
+            plt.xlabel('Solution time')
+            plt.ylabel('Solver and strategy combination')
+            plt.title(f'Comparison of solution times by solver and strategy for problem-instance {instances}')
 
             plt.xticks([])
 
@@ -287,9 +297,16 @@ class MoAnalysis:
         for instance_to_process in instances_list:
             filtered_df = df_copy[df_copy[self.instance] == instance_to_process]
 
+            # get the problem name
+            problem_for_instance_list = filtered_df[self.problem].unique()
+            if len(problem_for_instance_list) != 1:
+                raise ValueError(f"More than one problem for instance {instance_to_process} or no problem at all")
+            problem_for_instance = problem_for_instance_list[0]
+
+            name_plot = f"{problem_for_instance}-{instance_to_process}"
             # Plot 1: Regular Scale
             fig, ax = plt.subplots(figsize=(10, 5))
-            self.plot_data(filtered_df, ax, instance_to_process)
+            self.plot_data(filtered_df, ax, name_plot)
             ax.set_xlabel('Time(s)')
             ax.set_ylabel('Hypervolume')
             ax.legend(title='Solver Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -299,10 +316,10 @@ class MoAnalysis:
             if zoom_in_y:
                 # Plot 2: Logarithmic Scale
                 fig, ax = plt.subplots(figsize=(10, 5))
-                self.plot_data(filtered_df, ax, instance_to_process, zoom_in_y=True)
+                self.plot_data(filtered_df, ax, name_plot, zoom_in_y=True)
                 ax.set_xlabel('Time(s)')
-                ax.set_ylabel('Log of Hypervolume')
-                ax.legend(title='Solver Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+                ax.set_ylabel('Log of hypervolume')
+                ax.legend(title='Solver strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
                 plt.show()
                 figs.append(fig)
 
@@ -314,6 +331,13 @@ class MoAnalysis:
 
         for instance_to_process in instances_list:
             filtered_df = df_copy[df_copy[self.instance] == instance_to_process]
+
+            # get the problem name
+            problem_for_instance_list = filtered_df[self.problem].unique()
+            if len(problem_for_instance_list) != 1:
+                raise ValueError(f"More than one problem for instance {instance_to_process} or no problem at all")
+            problem_for_instance = problem_for_instance_list[0]
+            name_plot = f"{problem_for_instance}-{instance_to_process}"
 
             fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -331,13 +355,14 @@ class MoAnalysis:
                     print(f"Error parsing pareto_front for {solver_strategy}: {e}")
                     continue
 
+                label = f"{solver_strategy} - {len(pareto_front)} points"
                 pareto_front = np.array(pareto_front)
-                ax.scatter(pareto_front[:, 0], pareto_front[:, 1], label=solver_strategy)
+                ax.scatter(pareto_front[:, 0], pareto_front[:, 1], label=label)
 
             ax.set_xlabel('Objective 1')
             ax.set_ylabel('Objective 2')
-            ax.set_title(f'Pareto Fronts for Instance {instance_to_process}')
-            ax.legend(title='Solver Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax.set_title(f'Pareto fronts for instance {name_plot}')
+            ax.legend(title='Solver strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
             plt.show()
             figs.append(fig)
 
@@ -420,7 +445,9 @@ class MoAnalysis:
         df_time_number_solutions = self.get_time_number_solutions(df)
         figs.append(self.plot_strategy_time_score_to_get_the_front(df_time_number_solutions))
         # define, the instances to plot, by default all instances are plotted
-        instances_list = df[self.instance].unique()
+        df_copy = df.copy()
+        df_copy['problem_instance'] = df_copy[self.problem] + ' - ' + df_copy[self.instance]
+        instances_list = df_copy['problem_instance'].unique()
         # instances_list = ['paris_30']
-        figs = self.plot_solutions_in_time(df, instances_list, figs)
+        figs = self.plot_solutions_in_time(df_copy, instances_list, figs)
         return figs, df_total_best_avg_score

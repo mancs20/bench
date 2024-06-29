@@ -21,23 +21,24 @@ def remove_lines_from_dzn(file_path, lines_starting_with):
                 file.write(line)
 
 
-def add_experiment_name_path_to_csv(benchmark_name, problem, instances, input_dir, output_file):
+def add_file_experiment_path_to_csv(benchmark_name, problem, instances, input_dir, output_file, extension=False):
     # the line is in this way "benchmark_name","problem","instance","instance_relative_path"
     # check if data folder is in the input_dir path
     if "/data/mo/" not in input_dir:
         raise ValueError("The input_dir path must contain the data folder, /data/mo/")
-    instances_path = [0]*len(instances)
+    instances_path = [0] * len(instances)
 
     for id_instance, instance in enumerate(instances):
-        # check if there is a file dzn in the input_dir that contains the instance name
         print(f"Searching for instance {instance} in the input_dir with id {id_instance}...")
         found_instance = False
         for root, dirs, files in os.walk(input_dir):
             for file in files:
+                # check if the file has the right extension file
                 if instance in file:
-                    instances_path[id_instance] = os.path.join(root, file)
-                    found_instance = True
-                    break
+                    if extension is False or file.endswith(f".{extension}"):
+                        instances_path[id_instance] = os.path.join(root, file)
+                        found_instance = True
+                        break
             if found_instance:
                 break
         if not found_instance:
@@ -56,6 +57,5 @@ def add_experiment_name_path_to_csv(benchmark_name, problem, instances, input_di
             print(f"Line added to the csv file: {line}")
 
 
-
-
-
+def add_fzn_file_experiment_path_to_csv(benchmark_name, problem, instances, input_dir, output_file):
+    add_file_experiment_path_to_csv(benchmark_name, problem, instances, input_dir, output_file, extension="fzn")
