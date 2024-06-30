@@ -47,10 +47,7 @@ MEM_GB_PER_XP=32 # similar to Minizinc competition.
 VERSION="v4.10.14"
 SOLVER="choco-solver.org"
 SEARCH_STRATEGY="default"
-#ACE_COMMAND="java -Xmx${MEM_GB_PER_XP}g -jar $HOME/deps/ACE/build/libs/$SOLVER.jar"
 CHOCO_MO_JAR_COMMAND="java -Xmx${MEM_GB_PER_XP}g -jar choco-mo.jar"
-#ACE_OPTIONS="-t=$TIMEOUT -npc=True -ev" # be careful, in ACE the options must be situed after the instance file.
-CHOCO_MO_JAR_OPTIONS="" # be careful, in ACE the options must be situed after the instance file.
 OUTPUT_DIR="$BENCHMARKS_DIR_PATH/campaign/$MACHINE/mo/$SOLVER-$VERSION"
 mkdir -p "$OUTPUT_DIR"
 
@@ -75,4 +72,4 @@ lshw -json > "$OUTPUT_DIR/$(basename "$CHOCO_WORKFLOW_PATH")/hardware-$MACHINE".
 # The `parallel` command spawns one `srun` command per experiment, which executes the minizinc solver with the right resources.
 
 COMMANDS_LOG="$OUTPUT_DIR/$(basename "$CHOCO_WORKFLOW_PATH")/jobs.log"
-parallel --verbose --no-run-if-empty --rpl '{} uq()' -k --colsep ',' --skip-first-line -j $NUM_PARALLEL_EXPERIMENTS --resume --joblog "$COMMANDS_LOG" $SRUN_COMMAND $CHOCO_MO_JAR_COMMAND {1} {2} {3} "$BENCHMARKING_DIR_PATH"/{4} $SEARCH_STRATEGY $TIMEOUT {5} '2>&1' '|' python3 "$DUMP_PY_PATH" "$OUTPUT_DIR" {1} {2} {3} {5} $SOLVER $VERSION $CORES $THREADS $TIMEOUT $MEM_GB_PER_XP :::: "$INSTANCES_PATH" :::: "$FRONT_GENERATION_PATH"
+parallel --verbose --no-run-if-empty --rpl '{} uq()' -k --colsep ',' --skip-first-line -j $NUM_PARALLEL_EXPERIMENTS --resume --joblog "$COMMANDS_LOG" $SRUN_COMMAND $CHOCO_MO_JAR_COMMAND {1} {2} {3} "$BENCHMARKING_DIR_PATH"/{4} $SEARCH_STRATEGY $TIMEOUT {5} $CORES '2>&1' '|' python3 "$DUMP_PY_PATH" "$OUTPUT_DIR" {1} {2} {3} {5} $SOLVER $VERSION $CORES $THREADS $TIMEOUT $MEM_GB_PER_XP :::: "$INSTANCES_PATH" :::: "$FRONT_GENERATION_PATH"
