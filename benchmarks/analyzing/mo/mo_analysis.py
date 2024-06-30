@@ -226,6 +226,8 @@ class MoAnalysis:
 
     # Plot certain instances to check the number of solutions in time and the hypervolume
     def plot_solutions_in_time(self, df, instances_list, figs):
+        generic_key = "solutions_in_time"
+
         # Step 1: Combine solver_name and front_strategy into a new column
         # df.loc['solver_strategy'] = df.loc[self.solver_name] + ' ' + df.loc[self.front_strategy]
         df_copy = df.copy()
@@ -286,7 +288,9 @@ class MoAnalysis:
                        loc='upper left')
 
             plt.show()
-            figs.append(fig)
+
+            fig_key = f"{generic_key}_{instances}"
+            figs[fig_key] = fig
         return figs
 
     # Plot hypervolume vs time
@@ -294,6 +298,7 @@ class MoAnalysis:
         df_copy = df.copy()
         df_copy['solver_strategy'] = df_copy[[self.solver_name, self.front_strategy]].agg(' '.join, axis=1)
 
+        generic_key = "hypervolume_vs_time"
         for instance_to_process in instances_list:
             filtered_df = df_copy[df_copy[self.instance] == instance_to_process]
 
@@ -311,7 +316,8 @@ class MoAnalysis:
             ax.set_ylabel('Hypervolume')
             ax.legend(title='Solver Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
             plt.show()
-            figs.append(fig)
+            fig_key = f"{generic_key}_{name_plot}"
+            figs[fig_key] = fig
 
             if zoom_in_y:
                 # Plot 2: Logarithmic Scale
@@ -321,7 +327,8 @@ class MoAnalysis:
                 ax.set_ylabel('Log of hypervolume')
                 ax.legend(title='Solver strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
                 plt.show()
-                figs.append(fig)
+                fig_key_zoom = f"{generic_key}_log_{name_plot}"
+                figs[fig_key_zoom] = fig
 
         return figs
 
@@ -329,6 +336,7 @@ class MoAnalysis:
         df_copy = df.copy()
         df_copy['solver_strategy'] = df_copy[[self.solver_name, self.front_strategy]].agg(' '.join, axis=1)
 
+        generic_key = "pareto_front"
         for instance_to_process in instances_list:
             filtered_df = df_copy[df_copy[self.instance] == instance_to_process]
 
@@ -364,7 +372,8 @@ class MoAnalysis:
             ax.set_title(f'Pareto fronts for instance {name_plot}')
             ax.legend(title='Solver strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
             plt.show()
-            figs.append(fig)
+            fig_key = f"{generic_key}_{name_plot}"
+            figs[fig_key] = fig
 
         return figs
 
@@ -426,10 +435,8 @@ class MoAnalysis:
         # save df_total_best_avg_score to a csv file
         df_total_best_avg_score.to_csv(f'{folder_name}/df_total_best_avg_score.csv', sep=';')
 
-        # Save each figure
-        for i, fig in enumerate(figs):
-            image_path = os.path.join(folder_name, f"image_{i + 1}.pdf")
-            # make sure the fig is displayed correctly and that it is not cut off
+        for key, fig in figs.items():
+            image_path = os.path.join(folder_name, f"{key}.pdf")
             fig.tight_layout()
             fig.savefig(image_path)
             plt.close(fig)
@@ -438,12 +445,21 @@ class MoAnalysis:
 
     def print_all_figs_and_tables(self, df, figs):
         fig = self.plot_hypervolume_score_per_instance(df)
-        figs.append(fig)
+        problems_front_strategy_str = self.get_problems_front_strategy_str_for_fig_name(df)
+        key = f"1-HV_score_{problems_front_strategy_str}"
+        figs[key] = fig
+
         df_total_best_avg_score, fig = self.plot_hypervolume_best(df)
-        figs.append(fig)
-        figs.append(self.plot_hypervolume_best_average(df_total_best_avg_score))
+        strategy_str = self.get_unique_values_chained(df, self.front_strategy)
+        figs[f"2-HV_score_best_{strategy_str}"] = fig
+
+        fig = self.plot_hypervolume_best_average(df_total_best_avg_score)
+        figs[f"3-HV_score_avg_{strategy_str}"] = fig
+
         df_time_number_solutions = self.get_time_number_solutions(df)
-        figs.append(self.plot_strategy_time_score_to_get_the_front(df_time_number_solutions))
+        fig = self.plot_strategy_time_score_to_get_the_front(df_time_number_solutions)
+        figs[f"4-Time_score_{problems_front_strategy_str}"] = fig
+
         # define, the instances to plot, by default all instances are plotted
         df_copy = df.copy()
         df_copy['problem_instance'] = df_copy[self.problem] + ' - ' + df_copy[self.instance]
@@ -451,3 +467,18 @@ class MoAnalysis:
         # instances_list = ['paris_30']
         figs = self.plot_solutions_in_time(df_copy, instances_list, figs)
         return figs, df_total_best_avg_score
+
+    def get_problems_front_strategy_str_for_fig_name(self, df):
+        # get all the unique values of all self.problem and self.front_strategy from the df
+        problems_str = self.get_unique_values_chained(df, self.problem)
+        front_strategies_str = self.get_unique_values_chained(df, self.front_strategy)
+        return f"{problems_str}_{front_strategies_str}"
+
+    def get_unique_values_chained(self, df, df_col):
+        unique_values = df[df_col].unique()
+        unique_values_str = ''
+        for value in unique_values:
+            unique_values_str += value + '--'
+        unique_values_str = unique_values_str[:-2]
+        return unique_values_str
+
