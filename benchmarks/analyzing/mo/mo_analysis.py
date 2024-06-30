@@ -10,7 +10,8 @@ import os
 
 class MoAnalysis:
 
-    def __init__(self, benchmark='benchmark', problem='problem',instance='instance', solver_name='solver', front_strategy='front_generator',
+    def __init__(self, benchmark='benchmark', problem='problem', instance='instance', solver_name='solver',
+                 front_strategy='front_generator',
                  hypervolume='hypervolume', pareto_front='pareto_front',
                  hypervolume_evolution='hypervolume_evolution', number_of_solutions='front_cardinality',
                  exhaustive='exhaustive', time='time(s)', solutions_in_time='solutions_in_time',
@@ -27,6 +28,7 @@ class MoAnalysis:
         self.solutions_in_time = solutions_in_time
         self.pareto_front = pareto_front
         self.time = time
+        self.timeout = "timeout"
 
         if time_solver_sec is None:
             self.time_solver_sec = time
@@ -48,38 +50,37 @@ class MoAnalysis:
 
     # Function to calculate score for each front_strategy
     def calculate_hypervolume_score(self, group):
-        best_hypervolume = group[self.hypervolume].max()
-        group['score'] = group[self.hypervolume] / best_hypervolume
-        return group
+        best_hypervolume = group.max()
+        return group / best_hypervolume
 
-    def plot_hypervolume_best(self, df):
+    def plot_lexicographic_best(self, df):
         # Calculate hypervolume scores and reset index
-        df_score_by_front_strategy = df.groupby([self.problem, self.instance, self.solver_name]).apply(
-            self.calculate_hypervolume_score).reset_index(drop=True)
+        df_score_by_front_strategy = df.copy()
 
         # Calculate total fronts by solver
         df_total_front_by_solver = df.groupby([self.solver_name, self.front_strategy])[
             self.instance].count().reset_index()
 
         # Calculate the best fronts by solver
-        df_best_front_by_solver1 = df_score_by_front_strategy[df_score_by_front_strategy['score'] == 1.0].groupby(
-            [self.solver_name, self.front_strategy]).size().rename('best').to_frame().reset_index()
+        df_best_front_by_solver1 = (df_score_by_front_strategy[df_score_by_front_strategy[Cols.LEX_SCORE] == 1.0].
+                                    groupby([self.solver_name, self.front_strategy]).size().rename(Cols.LEX_BEST).
+                                    to_frame().reset_index())
 
         df_best_front_by_solver = df_score_by_front_strategy.groupby(
             [self.solver_name, self.front_strategy]).size().rename(
-            'best').to_frame().reset_index()
+            Cols.LEX_BEST).to_frame().reset_index()
 
         # Merge to align indices properly
         df_best_front_by_solver = pd.merge(df_best_front_by_solver, df_best_front_by_solver1,
                                            on=[self.solver_name, self.front_strategy], how='left',
                                            suffixes=('', '_new'))
 
-        df_best_front_by_solver['best'] = df_best_front_by_solver['best_new'].fillna(0).astype(int)
-        df_best_front_by_solver = df_best_front_by_solver.drop(columns='best_new')
+        df_best_front_by_solver[Cols.LEX_BEST] = df_best_front_by_solver[f"{Cols.LEX_BEST}_new"].fillna(0).astype(int)
+        df_best_front_by_solver = df_best_front_by_solver.drop(columns=f"{Cols.LEX_BEST}_new")
 
         # Calculate average scores by front strategy
         df_avg_score_by_front_strategy = df_score_by_front_strategy.groupby([self.solver_name, self.front_strategy])[
-            'score'].mean().rename('average_score').to_frame().reset_index()
+            Cols.LEX_SCORE].mean().rename(Cols.LEX_AVG_SCORE).to_frame().reset_index()
 
         # Merge dataframes to get total best and average scores
         df_total_best = pd.merge(df_total_front_by_solver, df_best_front_by_solver,
@@ -91,7 +92,7 @@ class MoAnalysis:
 
         # Plotting
         fig = plt.figure(figsize=(12, 6))
-        ax = sns.barplot(x=self.solver_name, y='best', hue=self.front_strategy, data=df_total_best_avg_score)
+        ax = sns.barplot(x=self.solver_name, y=Cols.LEX_BEST, hue=self.front_strategy, data=df_total_best_avg_score)
 
         for p in ax.containers:
             ax.bar_label(p, label_type='edge')
@@ -103,6 +104,104 @@ class MoAnalysis:
         plt.show()
         return df_total_best_avg_score, fig
 
+    def plot_lexicographic_score_best_average(self, df_total_best_avg_score):
+        # Create the second graph
+        fig = plt.figure(figsize=(12, 6))
+        ax = sns.barplot(x=self.solver_name, y=Cols.LEX_AVG_SCORE,
+                         hue=self.front_strategy, data=df_total_best_avg_score)
+
+        for p in ax.containers:
+            ax.bar_label(p, label_type='edge')
+
+        # Adding labels and legend
+        plt.title('Average score for each front strategy')
+        plt.xlabel('Solver name')
+        plt.ylabel('Average score')
+        plt.legend(title='Front strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.show()
+        return fig
+
+    def plot_hypervolume_best(self, df):
+        # Calculate hypervolume scores and reset index
+        df_score_by_front_strategy = df.copy()
+
+        # Calculate total fronts by solver
+        df_total_front_by_solver = df.groupby([self.solver_name, self.front_strategy])[
+            self.instance].count().reset_index()
+
+        # Calculate the best fronts by solver
+        df_best_front_by_solver1 = df_score_by_front_strategy[df_score_by_front_strategy[Cols.HV_SCORE] == 1.0].groupby(
+            [self.solver_name, self.front_strategy]).size().rename(Cols.HV_BEST).to_frame().reset_index()
+
+        df_best_front_by_solver = df_score_by_front_strategy.groupby(
+            [self.solver_name, self.front_strategy]).size().rename(
+            Cols.HV_BEST).to_frame().reset_index()
+
+        # Merge to align indices properly
+        df_best_front_by_solver = pd.merge(df_best_front_by_solver, df_best_front_by_solver1,
+                                           on=[self.solver_name, self.front_strategy], how='left',
+                                           suffixes=('', '_new'))
+
+        df_best_front_by_solver[Cols.HV_BEST] = df_best_front_by_solver[f"{Cols.HV_BEST}_new"].fillna(0).astype(int)
+        df_best_front_by_solver = df_best_front_by_solver.drop(columns=f"{Cols.HV_BEST}_new")
+
+        # Calculate average scores by front strategy
+        df_avg_score_by_front_strategy = df_score_by_front_strategy.groupby([self.solver_name, self.front_strategy])[
+            Cols.HV_SCORE].mean().rename(Cols.HV_AVG_SCORE).to_frame().reset_index()
+
+        # Merge dataframes to get total best and average scores
+        df_total_best = pd.merge(df_total_front_by_solver, df_best_front_by_solver,
+                                 on=[self.solver_name, self.front_strategy])
+        df_total_best_avg_score = pd.merge(df_total_best, df_avg_score_by_front_strategy,
+                                           on=[self.solver_name, self.front_strategy])
+
+        # Plotting
+        fig = plt.figure(figsize=(12, 6))
+        ax = sns.barplot(x=self.solver_name, y=Cols.HV_BEST, hue=self.front_strategy, data=df_total_best_avg_score)
+
+        for p in ax.containers:
+            ax.bar_label(p, label_type='edge')
+
+        plt.title('Times each strategy had the best hypervolume')
+        plt.xlabel('Solver name')
+        plt.ylabel('Times best')
+        plt.legend(title='Front Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.show()
+        return df_total_best_avg_score, fig
+
+    def plot_lexicographic_hv_time_score_per_instance(self, df):
+        # Set up the plot
+        fig = plt.figure(figsize=(10, 20))
+        sns.set_theme(style="whitegrid")
+
+        # Create a color palette for front_strategy
+        palette = sns.color_palette("husl", len(df[self.front_strategy].unique()))
+
+        # Calculate scores
+
+        # Get average scores for plotting
+        df_avg_score_by_front_strategy = (df.groupby([self.problem, self.instance, self.front_strategy])[
+                                              Cols.LEX_SCORE].mean().reset_index())
+        df_avg_score_by_front_strategy['problem_instance'] = (
+                df_avg_score_by_front_strategy[self.problem] + ' - ' + df_avg_score_by_front_strategy[self.instance]
+        )
+
+        # Plot hypervolume scores
+        ax = sns.barplot(x=Cols.LEX_SCORE, y='problem_instance', hue=self.front_strategy,
+                         data=df_avg_score_by_front_strategy,
+                         palette=palette, orient='h')
+
+        plt.title('Lexicographic hypervolume time score by front strategy for each problem-instance')
+        plt.xlabel('Score')
+        plt.ylabel('Problem-instance')
+        plt.legend(title='Front strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+
+        # Set the background to white and remove the grid lines
+        sns.despine(left=True, bottom=True)
+        ax.grid(False)
+        plt.show()
+        return fig
+
     def plot_hypervolume_score_per_instance(self, df):
         # Set up the plot
         fig = plt.figure(figsize=(10, 20))
@@ -112,24 +211,23 @@ class MoAnalysis:
         palette = sns.color_palette("husl", len(df[self.front_strategy].unique()))
 
         # Calculate scores
-        # todo review the new grouping, it should be benchmark, problem, instance, solver_name
-        df_score_by_front_strategy = df.groupby([self.problem, self.instance, self.solver_name]).apply(
-            self.calculate_hypervolume_score).reset_index(drop=True)
+        df_score_by_front_strategy = df.copy()
 
         # Get average scores for plotting
         df_avg_score_by_front_strategy = (df_score_by_front_strategy.groupby([self.problem, self.instance,
-                                                                             self.front_strategy])['score'].mean().
-                                          reset_index())
+                                                                             self.front_strategy])
+                                          [Cols.HV_SCORE].mean().reset_index())
         df_avg_score_by_front_strategy['problem_instance'] = (
                 df_avg_score_by_front_strategy[self.problem] + ' - ' + df_avg_score_by_front_strategy[self.instance]
         )
 
         # Plot hypervolume scores
-        ax = sns.barplot(x='score', y='problem_instance', hue=self.front_strategy, data=df_avg_score_by_front_strategy,
+        ax = sns.barplot(x=Cols.HV_SCORE, y='problem_instance', hue=self.front_strategy,
+                         data=df_avg_score_by_front_strategy,
                          palette=palette, orient='h')
 
         plt.title('Hypervolume score by front strategy for each problem-instance')
-        plt.xlabel('Score')
+        plt.xlabel('Hypervolume score')
         plt.ylabel('Problem-instance')
         plt.legend(title='Front Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
 
@@ -142,47 +240,54 @@ class MoAnalysis:
     def plot_hypervolume_best_average(self, df_total_best_avg_score):
         # Create the second graph
         fig = plt.figure(figsize=(12, 6))
-        ax = sns.barplot(x=self.solver_name, y='average_score',
+        ax = sns.barplot(x=self.solver_name, y=Cols.HV_AVG_SCORE,
                          hue=self.front_strategy, data=df_total_best_avg_score)
 
         for p in ax.containers:
             ax.bar_label(p, label_type='edge')
 
         # Adding labels and legend
-        plt.title('Average Score for each front strategy')
-        plt.xlabel('Solver Name')
+        plt.title('Average hypervolume score for each front strategy')
+        plt.xlabel('Solver name')
         plt.ylabel('Average score')
-        plt.legend(title='Front Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.legend(title='Front strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.show()
         return fig
 
     # Plot the time and the number of solutions for each instance
     def get_time_number_solutions(self, df):
         # Apply the function to calculate scores
-        df_time_number_solutions = df.groupby([self.problem, self.instance]).apply(
+        df_time_number_solutions = df.groupby([self.problem, self.instance, self.solver_name]).apply(
             self.calculate_number_of_solutions_score).reset_index(drop=True)
-        df_time = df.groupby([self.problem, self.instance, self.solver_name]).apply(self.calculate_time_score).reset_index(drop=True)
-        df_solver_front = df.groupby([self.problem, self.instance, self.solver_name]).apply(self.merge_solver_front_strategy_names).reset_index(
+        df_time = (df.groupby([self.problem, self.instance, self.solver_name]).apply(self.calculate_time_score).
+                   reset_index(drop=True))
+        df_solver_front = df.groupby([self.problem, self.instance, self.solver_name]).apply(
+            self.merge_solver_front_strategy_names).reset_index(
             drop=True)
 
         # Merge the results
-        df_time_number_solutions['time_score'] = df_time['time_score']
+        df_time_number_solutions[Cols.TIME_SCORE] = df_time[Cols.TIME_SCORE]
         df_time_number_solutions['solver_front_strategy'] = df_solver_front['solver_front_strategy']
         df_time_number_solutions['problem_instance'] = (
                 df_time_number_solutions[self.problem] + ' - ' + df_time_number_solutions[self.instance]
         )
 
         columns_to_select = [
-            'problem_instance', 'solver_front_strategy', 'time_score', self.time_solver_sec, 'number_of_solutions_score',
+            'problem_instance', 'solver_front_strategy', Cols.TIME_SCORE, self.time_solver_sec,
+            'number_of_solutions_score',
             self.number_of_solutions, self.exhaustive]
         df_time_number_solutions = df_time_number_solutions[columns_to_select]
 
         return df_time_number_solutions
 
     def calculate_time_score(self, group):
-        best_time = group.loc[group[self.time_solver_sec].idxmin(), self.time_solver_sec]
-        group['time_score'] = group[self.time_solver_sec] / best_time
+        best_time = group.loc[group[Cols.TIME_FOR_TIME_SCORE].idxmin(), self.time_solver_sec]
+        group[Cols.TIME_SCORE] = group[Cols.TIME_FOR_TIME_SCORE] / best_time
         return group
+
+    def calculate_time_score_for_lex_score(self, group):
+        best_time = group.min()
+        return best_time / group
 
     def calculate_number_of_solutions_score(self, group):
         best_number_of_solutions = group.loc[group[self.number_of_solutions].idxmin(), self.number_of_solutions]
@@ -206,7 +311,8 @@ class MoAnalysis:
         palette = sns.color_palette("husl", len(df_time_number_solutions['solver_front_strategy'].unique()))
 
         # Plot time scores with a conditional logarithmic x-axis
-        ax = sns.barplot(x='time_score', y='problem_instance', hue='solver_front_strategy', data=df_time_number_solutions,
+        ax = sns.barplot(x='time_score', y='problem_instance', hue='solver_front_strategy',
+                         data=df_time_number_solutions,
                          palette=palette, orient='h')
 
         plt.title('Time score by solver front strategy')
@@ -443,30 +549,73 @@ class MoAnalysis:
 
         print(f"All images have been saved in the '{folder_name}' folder.")
 
-    def print_all_figs_and_tables(self, df, figs):
-        fig = self.plot_hypervolume_score_per_instance(df)
-        problems_front_strategy_str = self.get_problems_front_strategy_str_for_fig_name(df)
-        key = f"1-HV_score_{problems_front_strategy_str}"
-        figs[key] = fig
+    def add_extra_fields_for_best_analysis(self, df):
+        # add necessary columns to the df, that evaluate the performance of the front strategy for each combination of
+        # problem, instance and solver
 
-        df_total_best_avg_score, fig = self.plot_hypervolume_best(df)
+        # 1. TimeForScore: If this.exaustive is True, then the time is the time is self.time_solver_sec, otherwise it is
+        # equal to the value of the colum self.timeout
+        df_extrafields = df.copy()
+        df_extrafields[Cols.TIME_FOR_TIME_SCORE] = df_extrafields.apply(
+            lambda x: x[self.time_solver_sec] if x[self.exhaustive] else x[self.timeout], axis=1)
+
+        # 2. HypervolumeScore: The hypervolume score is calculated as the ratio between the hypervolume of the front
+        # generated by the front strategy and the best hypervolume for the same problem, instance and solver
+        df_extrafields[Cols.HV_SCORE] = df_extrafields.groupby([self.problem, self.instance, self.solver_name])[
+            self.hypervolume].transform(self.calculate_hypervolume_score)
+
+        # 3. TimeScore: The time score is calculated as the ratio between the value of TimeForScore and the best
+        # TimeForScore for the same problem, instance and solver
+        df_extrafields[Cols.TIME_SCORE_FOR_LEX_SCORE] = df_extrafields.groupby(
+            [self.problem, self.instance, self.solver_name]
+        )[Cols.TIME_FOR_TIME_SCORE].transform(self.calculate_time_score_for_lex_score)
+
+        # 4. LexScore: If there is a front strategy with self.exhaustive equal to True for the same problem, instance
+        # and solver, then the LexScore is equal to value in Cols.TIME_SCORE_FOR_LEX_SCORE, otherwise it is equal to
+        # the value in Cols.HV_SCORE
+        df_extrafields[Cols.LEX_SCORE] = df_extrafields.apply(
+            lambda x: x[Cols.TIME_SCORE_FOR_LEX_SCORE] if x[self.exhaustive] else x[Cols.HV_SCORE], axis=1)
+
+        return df_extrafields
+
+    def print_general_figs_and_tables(self, df_original, figs):
+        df = self.add_extra_fields_for_best_analysis(df_original)
+
         strategy_str = self.get_unique_values_chained(df, self.front_strategy)
+        problems_front_strategy_str = self.get_problems_front_strategy_str_for_fig_name(df)
+
+        df_total_best_avg_score, fig = self.plot_lexicographic_best(df)
+        figs[f"0-Lex_HV_time_score_best_{strategy_str}"] = fig
+
+        fig = self.plot_lexicographic_score_best_average(df_total_best_avg_score)
+        figs[f"01-Lex_HV_time_score_avg_{strategy_str}"] = fig
+
+        fig = self.plot_lexicographic_hv_time_score_per_instance(df)
+        figs[f"02-Lex_HV_time_score_{problems_front_strategy_str}"] = fig
+
+        fig = self.plot_hypervolume_score_per_instance(df)
+        figs[f"1-HV_score_{problems_front_strategy_str}"] = fig
+
+        df_total_best_hv_avg_score, fig = self.plot_hypervolume_best(df)
         figs[f"2-HV_score_best_{strategy_str}"] = fig
 
-        fig = self.plot_hypervolume_best_average(df_total_best_avg_score)
+        fig = self.plot_hypervolume_best_average(df_total_best_hv_avg_score)
         figs[f"3-HV_score_avg_{strategy_str}"] = fig
 
         df_time_number_solutions = self.get_time_number_solutions(df)
         fig = self.plot_strategy_time_score_to_get_the_front(df_time_number_solutions)
         figs[f"4-Time_score_{problems_front_strategy_str}"] = fig
 
+        return figs, df_total_best_avg_score
+
+    def plot_solutions_points_in_time(self, df, figs):
         # define, the instances to plot, by default all instances are plotted
         df_copy = df.copy()
         df_copy['problem_instance'] = df_copy[self.problem] + ' - ' + df_copy[self.instance]
         instances_list = df_copy['problem_instance'].unique()
         # instances_list = ['paris_30']
         figs = self.plot_solutions_in_time(df_copy, instances_list, figs)
-        return figs, df_total_best_avg_score
+        return figs
 
     def get_problems_front_strategy_str_for_fig_name(self, df):
         # get all the unique values of all self.problem and self.front_strategy from the df
@@ -482,3 +631,15 @@ class MoAnalysis:
         unique_values_str = unique_values_str[:-2]
         return unique_values_str
 
+
+class Cols:
+    TIME_FOR_TIME_SCORE = 'time_for_time_score'
+    TIME_SCORE_FOR_LEX_SCORE = 'time_score_for_lex_score'  # here the best score is the maximum: 1, representing the
+    # minimum time
+    TIME_SCORE = 'time_score'  # here the best score is the minimum: 1, representing the minimum time
+    HV_SCORE = 'hypervolume_score'
+    HV_AVG_SCORE = 'hypervolume_average_score'
+    HV_BEST = 'hypervolume_best'
+    LEX_SCORE = 'score'
+    LEX_BEST = 'lex_best'
+    LEX_AVG_SCORE = 'lex_average_score'
