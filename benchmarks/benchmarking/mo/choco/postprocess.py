@@ -34,15 +34,11 @@ def get_solutions_in_time_for_choco(solver_messages):
     for index, message in enumerate(solver_messages):
         building_time, resolution_time = extract_times_choco(message)
         if index == 0:
-            previous_resolution_time = building_time + resolution_time
+            previous_resolution_time = building_time
+        previous_resolution_time += resolution_time
+        if "no solution" not in message.lower():
             sum_times.append(previous_resolution_time)
-        else:
-            # check if there were any solutions found
-            current_sum_time = resolution_time + previous_resolution_time
-            previous_resolution_time += resolution_time
-            if "No solution" in message:
-                continue
-            sum_times.append(current_sum_time)
+
     return sum_times
 
 
