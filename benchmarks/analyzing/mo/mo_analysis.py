@@ -364,7 +364,9 @@ class MoAnalysis:
                 y = [combination_to_y[combination]] * len(x)  # Use the mapped y-value for this combination
 
                 # Update y-tick labels to include the number of Pareto front points
-                pareto_front_count = len(row['pareto_front'].split('],['))
+                pareto_front_str = row[self.pareto_front]
+                pareto_front_str = pareto_front_str.replace(' ', '')
+                pareto_front_count = len(pareto_front_str.split('],['))
                 y_ticks_labels.append(f"{combination} - {pareto_front_count}")
                 plt.scatter(x, y, facecolors='none', edgecolors='b')  # Plot all points for this combination
                 # Step 4: Highlight special points
@@ -417,7 +419,7 @@ class MoAnalysis:
             name_plot = f"{problem_for_instance}-{instance_to_process}"
             # Plot 1: Regular Scale
             fig, ax = plt.subplots(figsize=(10, 5))
-            self.plot_data(filtered_df, ax, name_plot)
+            self.plot_hypervolume_evolution(filtered_df, ax, name_plot)
             ax.set_xlabel('Time(s)')
             ax.set_ylabel('Hypervolume')
             ax.legend(title='Solver Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -428,7 +430,7 @@ class MoAnalysis:
             if zoom_in_y:
                 # Plot 2: Logarithmic Scale
                 fig, ax = plt.subplots(figsize=(10, 5))
-                self.plot_data(filtered_df, ax, name_plot, zoom_in_y=True)
+                self.plot_hypervolume_evolution(filtered_df, ax, name_plot, zoom_in_y=True)
                 ax.set_xlabel('Time(s)')
                 ax.set_ylabel('Log of hypervolume')
                 ax.legend(title='Solver strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -483,7 +485,7 @@ class MoAnalysis:
 
         return figs
 
-    def plot_data(self, filtered_df, ax, instance_to_process, consider_only_pareto=False, zoom_in_y=False):
+    def plot_hypervolume_evolution(self, filtered_df, ax, instance_to_process, consider_only_pareto=False, zoom_in_y=False):
         unique_combinations = filtered_df['solver_strategy'].unique()
         ax.set_title(f'Instance: {instance_to_process}')
         all_y_values = []
@@ -520,7 +522,8 @@ class MoAnalysis:
                 # for each y value, add it to the all_y_values list
                 all_y_values.extend(y)
                 # Plot the data
-                ax.plot(x_all_times, y, marker='o', linestyle='-', label=combination)
+                label = f"{combination} - {len(x_all_times)} points"
+                ax.plot(x_all_times, y, marker='o', linestyle='-', label=label)
 
         if zoom_in_y:
             median_y = np.median(all_y_values)
