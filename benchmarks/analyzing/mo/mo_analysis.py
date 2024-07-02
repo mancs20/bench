@@ -498,6 +498,82 @@ class MoAnalysis:
 
         return figs
 
+    def plot_specific_front(self, df, instance_to_process, figs, margin=0.05):
+        df_copy = df.copy()
+        df_copy['solver_strategy'] = df_copy[[self.solver_name, self.front_strategy]].agg(' '.join, axis=1)
+
+        generic_key = "pareto_front"
+        filtered_df = df_copy[df_copy[self.instance] == instance_to_process]
+
+        # get the problem name
+        problem_for_instance_list = filtered_df[self.problem].unique()
+        if len(problem_for_instance_list) != 1:
+            raise ValueError(f"More than one problem for instance {instance_to_process} or no problem at all")
+        problem_for_instance = problem_for_instance_list[0]
+
+        # Initialize lists to find global min and max for x and y
+        all_x = []
+        all_y = []
+
+        for _, row in filtered_df.iterrows():
+            pareto_front_str = row[self.pareto_front]
+            if pareto_front_str.startswith('{') and pareto_front_str.endswith('}'):
+                pareto_front_str = pareto_front_str.replace('{', '[').replace('}', ']')
+
+            try:
+                pareto_front = ast.literal_eval(pareto_front_str)
+                pareto_front = np.array(pareto_front)
+                all_x.extend(pareto_front[:, 0])
+                all_y.extend(pareto_front[:, 1])
+            except (SyntaxError, ValueError) as e:
+                print(f"Error parsing pareto_front for {row['solver_strategy']}: {e}")
+
+        # Determine global min and max for x and y
+        x_min, x_max = min(all_x), max(all_x)
+        y_min, y_max = min(all_y), max(all_y)
+        x_margin = (x_max - x_min) * margin
+        y_margin = (y_max - y_min) * margin
+        x_min -= x_margin
+        x_max += x_margin
+        y_min -= y_margin
+        y_max += y_margin
+
+        for _, row in filtered_df.iterrows():
+            solver_strategy = row['solver_strategy']
+            pareto_front_str = row[self.pareto_front]
+
+            if pareto_front_str.startswith('{') and pareto_front_str.endswith('}'):
+                pareto_front_str = pareto_front_str.replace('{', '[').replace('}', ']')
+
+            try:
+                pareto_front = ast.literal_eval(pareto_front_str)
+            except (SyntaxError, ValueError) as e:
+                print(f"Error parsing pareto_front for {solver_strategy}: {e}")
+                continue
+
+            exhaustive_star = ''
+            if row[self.exhaustive]:
+                exhaustive_star = '*'
+            label = f"{solver_strategy} - {len(pareto_front)} points{exhaustive_star}"
+
+            fig, ax = plt.subplots(figsize=(10, 5))
+            pareto_front = np.array(pareto_front)
+            ax.scatter(pareto_front[:, 0], pareto_front[:, 1], label=label)
+
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
+
+            ax.set_xlabel('Objective 1')
+            ax.set_ylabel('Objective 2')
+            ax.set_title(f'Pareto front for {solver_strategy} in instance {problem_for_instance}-{instance_to_process}')
+            ax.legend(title='Solver strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.show()
+
+            fig_key = f"{generic_key}_{problem_for_instance}_{instance_to_process}_{solver_strategy.replace(' ', '_')}"
+            figs[fig_key] = fig
+
+        return figs
+
     def plot_hypervolume_evolution(self, filtered_df, ax, instance_to_process, consider_only_pareto=False, zoom_in_y=False):
         unique_combinations = filtered_df['solver_strategy'].unique()
         ax.set_title(f'Instance: {instance_to_process}')
