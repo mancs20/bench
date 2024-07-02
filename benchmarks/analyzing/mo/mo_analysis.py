@@ -70,10 +70,20 @@ class MoAnalysis:
             [self.solver_name, self.front_strategy]).size().rename(
             Cols.LEX_BEST).to_frame().reset_index()
 
+        # Count the number of times self.exhaustive was true for each strategy
+        df_best_front_by_solver2 = df_score_by_front_strategy.groupby(
+            [self.solver_name, self.front_strategy])[self.exhaustive].sum().rename(
+            f"total_{self.exhaustive}").to_frame().reset_index()
+
         # Merge to align indices properly
         df_best_front_by_solver = pd.merge(df_best_front_by_solver, df_best_front_by_solver1,
                                            on=[self.solver_name, self.front_strategy], how='left',
                                            suffixes=('', '_new'))
+
+        df_best_front_by_solver = pd.merge(df_best_front_by_solver, df_best_front_by_solver2,
+                                           on=[self.solver_name, self.front_strategy], how='left',
+                                           suffixes=('', '_new'))
+
 
         df_best_front_by_solver[Cols.LEX_BEST] = df_best_front_by_solver[f"{Cols.LEX_BEST}_new"].fillna(0).astype(int)
         df_best_front_by_solver = df_best_front_by_solver.drop(columns=f"{Cols.LEX_BEST}_new")
@@ -100,7 +110,7 @@ class MoAnalysis:
         plt.title('Times each strategy was the best')
         plt.xlabel('Solver name')
         plt.ylabel('Times best')
-        plt.legend(title='Front Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.legend(title='Front strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.show()
         return df_total_best_avg_score, fig
 
