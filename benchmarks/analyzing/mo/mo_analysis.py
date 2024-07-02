@@ -14,7 +14,7 @@ class MoAnalysis:
                  front_strategy='front_generator',
                  hypervolume='hypervolume', pareto_front='pareto_front',
                  hypervolume_evolution='hypervolume_evolution', number_of_solutions='front_cardinality',
-                 exhaustive='exhaustive', time='time (seconds)', solutions_in_time='solutions_in_time',
+                 exhaustive='exhaustive', time='time(s)', solutions_in_time='solutions_in_time',
                  time_solver_sec=None, pareto_solutions_time_list=None, all_solutions=None):
         self.benchmark = benchmark
         self.problem = problem
@@ -481,7 +481,10 @@ class MoAnalysis:
                     print(f"Error parsing pareto_front for {solver_strategy}: {e}")
                     continue
 
-                label = f"{solver_strategy} - {len(pareto_front)} points"
+                exhaustive_star = '';
+                if row[self.exhaustive]:
+                    exhaustive_star = '*'
+                label = f"{solver_strategy} - {len(pareto_front)} points{exhaustive_star}"
                 pareto_front = np.array(pareto_front)
                 ax.scatter(pareto_front[:, 0], pareto_front[:, 1], label=label)
 
@@ -532,7 +535,10 @@ class MoAnalysis:
                 # for each y value, add it to the all_y_values list
                 all_y_values.extend(y)
                 # Plot the data
-                label = f"{combination} - {len(x_all_times)} points"
+                exhaustive_star = '';
+                if row[self.exhaustive]:
+                    exhaustive_star = '*'
+                label = f"{combination} - {len(x_all_times)} points{exhaustive_star}"
                 ax.plot(x_all_times, y, marker='o', linestyle='-', label=label)
 
         if zoom_in_y:
