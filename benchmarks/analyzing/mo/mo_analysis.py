@@ -14,7 +14,7 @@ class MoAnalysis:
                  front_strategy='front_generator',
                  hypervolume='hypervolume', pareto_front='pareto_front',
                  hypervolume_evolution='hypervolume_evolution', number_of_solutions='front_cardinality',
-                 exhaustive='exhaustive', time='time(s)', solutions_in_time='solutions_in_time',
+                 exhaustive='exhaustive', time='time (seconds)', solutions_in_time='solutions_in_time',
                  time_solver_sec=None, pareto_solutions_time_list=None, all_solutions=None):
         self.benchmark = benchmark
         self.problem = problem
@@ -430,7 +430,7 @@ class MoAnalysis:
             # Plot 1: Regular Scale
             fig, ax = plt.subplots(figsize=(10, 5))
             self.plot_hypervolume_evolution(filtered_df, ax, name_plot)
-            ax.set_xlabel('Time(s)')
+            ax.set_xlabel('Time (seconds)')
             ax.set_ylabel('Hypervolume')
             ax.legend(title='Solver Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
             plt.show()
@@ -441,7 +441,7 @@ class MoAnalysis:
                 # Plot 2: Logarithmic Scale
                 fig, ax = plt.subplots(figsize=(10, 5))
                 self.plot_hypervolume_evolution(filtered_df, ax, name_plot, zoom_in_y=True)
-                ax.set_xlabel('Time(s)')
+                ax.set_xlabel('Time (seconds)')
                 ax.set_ylabel('Log of hypervolume')
                 ax.legend(title='Solver strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
                 plt.show()
