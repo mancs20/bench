@@ -583,11 +583,34 @@ class MoAnalysis:
             [self.problem, self.instance, self.solver_name]
         )[Cols.TIME_FOR_TIME_SCORE].transform(self.calculate_time_score_for_lex_score)
 
-        # 4. LexScore: If there is a front strategy with self.exhaustive equal to True for the same problem, instance
-        # and solver, then the LexScore is equal to value in Cols.TIME_SCORE_FOR_LEX_SCORE, otherwise it is equal to
-        # the value in Cols.HV_SCORE
-        df_extrafields[Cols.LEX_SCORE] = df_extrafields.apply(
-            lambda x: x[Cols.TIME_SCORE_FOR_LEX_SCORE] if x[self.exhaustive] else x[Cols.HV_SCORE], axis=1)
+        # 4. LexScore: There are 4 cases:
+        # 1. All have exhaustive = False. In this case, the LexScore is equal to the HV_SCORE
+        # 2. All have exhaustive = True. In this case, the LexScore is equal to the TIME_SCORE_FOR_LEX_SCORE
+        # 3. Only one has exhaustive = True. In this case, the LexScore is equal to the HV_SCORE if the second highest
+        # HV_SCORE is lower than the TIME_SCORE_FOR_LEX_SCORE, otherwise it is equal to the TIME_SCORE_FOR_LEX_SCORE
+        # 4. More than one has exhaustive = True. In this case, the LexScore is equal to the TIME_SCORE_FOR_LEX_SCORE
+
+        # df_extrafields[Cols.LEX_SCORE] = df_extrafields.apply(
+        #     lambda x: x[Cols.TIME_SCORE_FOR_LEX_SCORE] if x[self.exhaustive] else x[Cols.HV_SCORE], axis=1)
+        df_extrafields[Cols.LEX_SCORE] = 0.0  # Initialize with default value
+        grouped = df_extrafields.groupby([self.problem, self.instance, self.solver_name])
+
+        for name, group in grouped:
+            exhaustive_count = group[self.exhaustive].sum()
+            if exhaustive_count == 0:  # All have exhaustive = False
+                df_extrafields.loc[group.index, Cols.LEX_SCORE] = group[Cols.HV_SCORE].astype(float)
+            elif exhaustive_count == len(group):  # All have exhaustive = True
+                df_extrafields.loc[group.index, Cols.LEX_SCORE] = group[Cols.TIME_SCORE_FOR_LEX_SCORE].astype(float)
+            elif exhaustive_count == 1:  # Only one has exhaustive = True
+                # Find the row with the second highest HV_SCORE
+                second_highest_hv_score = group.nlargest(2, Cols.HV_SCORE).iloc[-1]
+                # Determine which score to use for the whole group
+                if second_highest_hv_score[Cols.HV_SCORE] < second_highest_hv_score[Cols.TIME_SCORE_FOR_LEX_SCORE]:
+                    df_extrafields.loc[group.index, Cols.LEX_SCORE] = group[Cols.HV_SCORE].astype(float)
+                else:
+                    df_extrafields.loc[group.index, Cols.LEX_SCORE] = group[Cols.TIME_SCORE_FOR_LEX_SCORE].astype(float)
+            else:  # More than one has exhaustive = True
+                df_extrafields.loc[group.index, Cols.LEX_SCORE] = group[Cols.TIME_SCORE_FOR_LEX_SCORE].astype(float)
 
         return df_extrafields
 
