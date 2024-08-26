@@ -19,7 +19,10 @@ def is_valid_json(json_str):
 
 def calculate_hypervolume(front, reference_point):
     # check if it is a maximization problem
-    comparisson_array = reference_point < front[0]
+    if len(front) > 1:
+        comparisson_array = reference_point < front[1]
+    else:
+        comparisson_array = reference_point < front[0]
     if comparisson_array[0]:
         # convert maximization to minimization to calculate the Hypervolume using the pymoo library
         reference_point = -reference_point
@@ -27,7 +30,7 @@ def calculate_hypervolume(front, reference_point):
     return Hypervolume(ref_point=reference_point)(front)
 
 
-def get_solutions_in_time_for_choco(solver_messages):
+def get_solutions_in_time_for_choco(solver_messages, all_solutions, gavanelli_front_strategy):
     sum_times = []
     previous_resolution_time = 0
 
@@ -35,8 +38,11 @@ def get_solutions_in_time_for_choco(solver_messages):
         building_time, resolution_time = extract_times_choco(message)
         if index == 0:
             previous_resolution_time = building_time
-        previous_resolution_time += resolution_time
-        if "no solution" not in message.lower():
+        if not gavanelli_front_strategy:
+            previous_resolution_time += resolution_time
+        else:
+            previous_resolution_time = resolution_time
+        if all_solutions or ("no solution" not in message.lower()):
             sum_times.append(previous_resolution_time)
 
     return sum_times
@@ -114,20 +120,26 @@ if __name__ == "__main__":
                 current_json_mo_solution_details.pop("reference_point")
                 hypervolume = calculate_hypervolume(np.array(current_json_mo_solution_details.get('pareto_front')), np.array(reference_point))
                 front_metrics.update({"hypervolume": hypervolume})
-                front = current_json_mo_solution_details.get('pareto_front')
-                front_metrics.update({"front_cardinality": len(front)})
+                if 'all_solutions' in current_json_mo_solution_details:
+                    solutions = current_json_mo_solution_details.get('all_solutions')
+                else:
+                    solutions = current_json_mo_solution_details.get('pareto_front')
+                front_metrics.update({"front_cardinality": len(current_json_mo_solution_details.get('pareto_front'))})
                 # calculate hypervolume evolution
-                hypervolume_evolution = [0] * len(front)
+                hypervolume_evolution = [0] * len(solutions)
                 temp_front = []
-                for index, point in enumerate(front):
+                for index, point in enumerate(solutions):
                     temp_front.append(point)
-                    hypervolume_evolution[index] = calculate_hypervolume(np.array(temp_front),
-                                                                         np.array(reference_point))
+                    hypervolume_evolution[index] = float(calculate_hypervolume(np.array(temp_front),
+                                                                         np.array(reference_point)))
                 front_metrics.update({"hypervolume_evolution": hypervolume_evolution})
+                front_metrics["all_solutions"] = solutions
         front_metrics["solutions_in_time"] = "Not available."
         if "solver_messages" in current_json_mo_solution_details:
             if "choco" in statistics["solver"]:
-                solutions_in_time = get_solutions_in_time_for_choco(current_json_mo_solution_details["solver_messages"])
+                solutions_in_time = get_solutions_in_time_for_choco(current_json_mo_solution_details["solver_messages"],
+                                                                    'all_solutions' in current_json_mo_solution_details,
+                                                                    filtered_data['front_generator'] == 'ParetoGavanelliGlobalConstraint')
                 front_metrics["solutions_in_time"] = solutions_in_time
             current_json_mo_solution_details.pop("solver_messages")
         filtered_data.update({field: current_json_mo_solution_details.get(field, None) for field

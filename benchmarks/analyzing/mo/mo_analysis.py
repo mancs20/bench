@@ -15,7 +15,7 @@ class MoAnalysis:
                  hypervolume='hypervolume', pareto_front='pareto_front',
                  hypervolume_evolution='hypervolume_evolution', number_of_solutions='front_cardinality',
                  exhaustive='exhaustive', time='time(s)', solutions_in_time='solutions_in_time',
-                 time_solver_sec=None, pareto_solutions_time_list=None, all_solutions=None):
+                 time_solver_sec=None, pareto_solutions_time_list=None, all_solutions='all_solutions'):
         self.benchmark = benchmark
         self.problem = problem
         self.hypervolume = hypervolume
