@@ -1,5 +1,11 @@
-ParetoByUnsatisfaction
+ParetoImproveAllObjs
+GIA
+GIA_bounded
+GIA_boundedLazy
+BiObjGIA_sparsity
+BiObjGIA_sparsityBounded
+BiObjGIA_regionImplementation
 ParetoGavanelliGlobalConstraint
+ParetoDisjunctiveProgramming
 Saugmecon
 SaugmeconFrontVerify
-ParetoDisjunctiveProgramming
