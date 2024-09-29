@@ -55,6 +55,7 @@ def extract_times_choco(message):
 
 
 if __name__ == "__main__":
+    calculate_evolution_for_gavanelli = False # if the evolution of the hypervolume is not needed, set this to False, as it could take a lot of time
     output_dir = sys.argv[1]
     if output_dir[-1] == "/":
         output_dir = output_dir[:-1]
@@ -126,17 +127,20 @@ if __name__ == "__main__":
                     solutions = current_json_mo_solution_details.get('pareto_front')
                 front_metrics.update({"front_cardinality": len(current_json_mo_solution_details.get('pareto_front'))})
                 # calculate hypervolume evolution
-                hypervolume_evolution = [0] * len(solutions)
-                temp_front = []
-                for index, point in enumerate(solutions):
-                    temp_front.append(point)
-                    hypervolume_evolution[index] = float(calculate_hypervolume(np.array(temp_front),
-                                                                         np.array(reference_point)))
-                front_metrics.update({"hypervolume_evolution": hypervolume_evolution})
+                if calculate_evolution_for_gavanelli or filtered_data['front_generator'] != 'ParetoGavanelliGlobalConstraint':
+                    hypervolume_evolution = [0] * len(solutions)
+                    temp_front = []
+                    for index, point in enumerate(solutions):
+                        temp_front.append(point)
+                        hypervolume_evolution[index] = float(calculate_hypervolume(np.array(temp_front),
+                                                                             np.array(reference_point)))
+                    front_metrics.update({"hypervolume_evolution": hypervolume_evolution})
+                else:
+                    front_metrics.update({"hypervolume_evolution": "Not available."})
                 front_metrics["all_solutions"] = solutions
         front_metrics["solutions_in_time"] = "Not available."
         if "solver_messages" in current_json_mo_solution_details:
-            if "choco" in statistics["solver"]:
+            if "choco" in statistics["solver"] and (calculate_evolution_for_gavanelli or filtered_data['front_generator'] != 'ParetoGavanelliGlobalConstraint'):
                 solutions_in_time = get_solutions_in_time_for_choco(current_json_mo_solution_details["solver_messages"],
                                                                     'all_solutions' in current_json_mo_solution_details,
                                                                     filtered_data['front_generator'] == 'ParetoGavanelliGlobalConstraint')
