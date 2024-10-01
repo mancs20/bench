@@ -5,6 +5,7 @@ import seaborn as sns
 import numpy as np  # Needed for log transformation
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from IPython.display import display
 import os
 
 
@@ -308,7 +309,7 @@ class MoAnalysis:
         group['solver_front_strategy'] = group[self.solver_name] + ' ' + group[self.front_strategy]
         return group
 
-    # Plot number of solutions in time
+    # Plot time score
     def plot_strategy_time_score_to_get_the_front(self, df_time_number_solutions):
         # Set up the plot
         fig = plt.figure(figsize=(10, 20))
@@ -321,7 +322,7 @@ class MoAnalysis:
         palette = sns.color_palette("husl", len(df_time_number_solutions['solver_front_strategy'].unique()))
 
         # Plot time scores with a conditional logarithmic x-axis
-        ax = sns.barplot(x='time_score', y='problem_instance', hue='solver_front_strategy',
+        ax = sns.barplot(x=Cols.TIME_SCORE, y='problem_instance', hue='solver_front_strategy',
                          data=df_time_number_solutions,
                          palette=palette, orient='h')
 
@@ -331,7 +332,7 @@ class MoAnalysis:
         plt.legend(title='Solver - Front Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
 
         # Apply a logarithmic scale only for values greater than the threshold
-        if df_time_number_solutions['time_score'].max() > log_threshold:
+        if df_time_number_solutions[Cols.TIME_SCORE].max() > log_threshold:
             plt.xscale('log')
 
         # Set the background to white and remove the grid lines
@@ -339,6 +340,292 @@ class MoAnalysis:
         ax.grid(False)
         plt.show()
         return fig
+
+    def plot_general_metric_times_best(self, df, metric_col, maximize=True, figs=None, group_by_solver=False,
+                                       csvs=None):
+        """
+        Generates N+1 plots and tables: N plots for each unique problem and 1 general plot considering all instances.
+
+        Parameters:
+        df (pd.DataFrame): The dataframe containing results, including a 'problem' column.
+        metric_col (str): The name of the column representing the metric.
+        maximize (bool): If True, higher values are better. If False, lower values are better.
+        group_by_solver (bool): If True, the x-axis will show the solver + front strategy combination.
+                                If False, it will only show the front strategy.
+        figs (dict): A dictionary to store the plot figures.
+        csvs (dict): A dictionary to store the CSV file paths for later saving.
+        """
+        if figs is None:
+            figs = {}
+        if csvs is None:
+            csvs = {}
+
+        # Step 1: Create a general plot considering all instances
+        general_df = df  # Use the entire DataFrame for the general case
+        general_problem_name = 'All instances'
+        self.plot_metric_for_problem(general_df, metric_col, maximize, group_by_solver, general_problem_name, figs,
+                                     csvs)
+
+        # Step 2: Create individual plots for each problem
+        problems = df['problem'].unique()  # Get unique problems
+        for problem in problems:
+            df_problem = df[df['problem'] == problem]  # Filter DataFrame for the current problem
+            self.plot_metric_for_problem(df_problem, metric_col, maximize, group_by_solver, problem, figs, csvs)
+
+        return figs, csvs
+
+    def plot_metric_for_problem(self, df, metric_col, maximize, group_by_solver, problem_name, figs, csvs):
+        """
+        Plots the metric for the given problem or for all instances if `problem_name` is "All instances".
+        Saves the plot and the dataframe.
+        """
+        # Group by instance to compare solvers and strategies for each instance
+        grouped = df.groupby('instance')
+
+        # Initialize dictionaries to store the number of best occurrences for each strategy
+        best_count = {}
+        absolute_best_count = {}
+        shared_best_count = {}
+
+        # Iterate over each instance group
+        for instance, group in grouped:
+            # Find the best value (max or min) depending on the maximize flag
+            if maximize:
+                best_value = group[metric_col].max()  # Highest value is better
+            else:
+                best_value = group[metric_col].min()  # Lowest value is better
+
+            # Find strategies that have this best value
+            best_strategies = group[group[metric_col] == best_value][[self.solver_name, self.front_strategy]]
+
+            # Define the key for counting (solver + front or only front)
+            for _, row in best_strategies.iterrows():
+                if group_by_solver:
+                    best_solver_front = (row[self.solver_name], row[self.front_strategy])
+                else:
+                    best_solver_front = row[self.front_strategy]
+
+                # Increment the count (absolute if only one, shared if multiple)
+                if len(best_strategies) == 1:
+                    absolute_best_count[best_solver_front] = absolute_best_count.get(best_solver_front, 0) + 1
+                else:
+                    shared_best_count[best_solver_front] = shared_best_count.get(best_solver_front, 0) + 1
+
+        # Combine absolute and shared best counts
+        all_strategies = set(absolute_best_count.keys()).union(shared_best_count.keys())
+        for strategy in all_strategies:
+            best_count[strategy] = (
+                    absolute_best_count.get(strategy, 0) + shared_best_count.get(strategy, 0)
+            )
+
+        # Convert the best_count dictionaries to pandas DataFrame for saving
+        best_df = pd.DataFrame({
+            'Strategy': list(best_count.keys()),  # Front strategy or solver + front based on grouping
+            'Total Best': list(best_count.values()),
+            'Absolute Best': [absolute_best_count.get(strategy, 0) for strategy in best_count],
+            'Shared Best': [shared_best_count.get(strategy, 0) for strategy in best_count],
+        })
+
+        # Save the DataFrame as a CSV file if required
+        if csvs is not None:
+            csvs[f"best_considering_{metric_col}_{problem_name}"] = best_df
+
+        # Plot the results using a stacked bar chart
+        fig, ax = plt.subplots()
+        best_df.set_index('Strategy')[['Absolute Best', 'Shared Best']].plot(
+            kind='bar', stacked=True, ax=ax, color=['#1f77b4', '#ff7f0e'])
+
+        # Add total counts on top of each bar
+        for idx, row in best_df.iterrows():
+            ax.text(idx, row['Total Best'] + 0.1, str(int(row['Total Best'])), ha='center')
+
+        # Add labels and title
+        ax.set_ylabel(f"Number of times best : {metric_col}")
+        ax.set_xlabel('Algorithms')
+        ax.grid(False)
+        ax.set_title(f"{problem_name}. Total instances: {len(df['instance'].unique())}")
+        plt.xticks(rotation=0)
+        plt.tight_layout()
+
+        if best_df['Shared Best'].sum() > 0:
+            # Add legend for absolute and shared best
+            ax.legend(['Absolute Best', 'Shared Best'], title='Best Type', bbox_to_anchor=(1.05, 1), loc='upper left')
+        else:
+            ax.get_legend().remove()
+
+        # Save the figure in figs if provided
+        if figs is not None:
+            figs[f"best_considering_{metric_col}_{problem_name}"] = fig
+
+    def plot_metric_by_instance_problem(self, df, metric_col, maximize, figs=None, csvs=None, group_by_solver=False):
+        """
+        Plot the raw metric values for each problem and instance.
+        """
+        problems = df[self.problem].unique()
+
+        # Loop through each problem and create a plot for it
+        for problem in problems:
+            df_problem = df[df[self.problem] == problem]  # Filter DataFrame for the current problem
+
+            # Use the raw metric values for plotting
+            metric_data = df_problem[metric_col]
+
+            # Call the helper function to create the plot
+            figs, csvs = self._plot_instance_problem_helper(df_problem, metric_col, metric_data, maximize, figs, csvs, problem,
+                                                            group_by_solver)
+
+        return figs, csvs
+
+    def plot_metric_by_instance_problem_normalized(self, df, metric_col, maximize, figs=None, csvs=None, group_by_solver=False):
+        """
+        Plot the normalized metric values for each problem and instance.
+        Each value is normalized relative to the best value in the instance.
+        """
+        problems = df[self.problem].unique()
+
+        # Loop through each problem and create a plot for it
+        for problem in problems:
+            df_problem = df[df[self.problem] == problem]  # Filter DataFrame for the current problem
+            metric_data = df_problem.copy()  # Make a copy to avoid modifying the original df
+
+            # Normalize the values per instance
+            for instance in df_problem[self.instance].unique():
+                df_instance = df_problem[df_problem[self.instance] == instance]  # Filter for each instance
+                best_value = df_instance[metric_col].max() if maximize else df_instance[metric_col].min()
+
+                # Apply normalization
+                metric_data.loc[df_instance.index, 'normalized'] = df_instance[metric_col] / best_value
+                if maximize:
+                    metric_data.loc[df_instance.index, 'normalized'] = df_instance[metric_col] / best_value  # best_value / df_instance[metric_col]
+                else:
+                    metric_data.loc[df_instance.index, 'normalized'] = df_instance[metric_col] / best_value
+
+            # Use the normalized values for plotting
+            metric_data_values = metric_data['normalized']
+
+            # Call the helper function to create the plot
+            figs, csvs = self._plot_instance_problem_helper(df_problem, metric_col, metric_data_values, maximize, figs, csvs,
+                                                            problem, group_by_solver)
+
+        return figs, csvs
+
+    def _plot_instance_problem_helper(self, df, metric_col, metric_data, maximize, figs, csvs, problem_name,
+                                      group_by_solver):
+        """
+        Helper function to plot metric values for each problem and instance using Seaborn.
+
+        Parameters:
+        - df: Filtered DataFrame for the current problem.
+        - metric_col: Name of the column containing the metric.
+        - metric_data: The values to be plotted (either raw or normalized).
+        - figs: Dictionary to store figures.
+        - problem_name: Name of the current problem (for the title).
+        - group_by_solver: If True, use solver + strategy combination on the plot.
+        """
+
+        if figs is None:
+            figs = {}
+
+        if csvs is None:
+            csvs = {}
+
+        # Copy the DataFrame to avoid the SettingWithCopyWarning
+        df1 = df.copy()
+
+        # Handle missing values (if any) in problem or instance columns using .loc to avoid SettingWithCopyWarning
+        df1.loc[:, self.problem] = df1[self.problem].fillna('Unknown Problem')
+        df1.loc[:, self.instance] = df1[self.instance].fillna('Unknown Instance')
+
+        # Ensure problem and instance are strings for concatenation
+        # df1.loc[:, 'problem_instance'] = df1[self.problem].astype(str) + ' - ' + df1[self.instance].astype(str)
+        df1.loc[:, 'problem_instance'] = df1[self.instance].astype(str)
+
+        # If grouping by solver and strategy, create a combined label using .loc
+        if group_by_solver:
+            df1.loc[:, 'strategy_combination'] = df1[self.solver_name] + '-' + df1[self.front_strategy]
+            strategy_col = 'strategy_combination'
+        else:
+            strategy_col = self.front_strategy
+
+        # Create a DataFrame for metrics by instance and strategy
+        metric_table = df1.pivot_table(index=self.instance, columns=strategy_col, values=metric_col)
+
+        # Initialize a list to track how many times each strategy is the best
+        best_counts = {strategy: 0 for strategy in metric_table.columns}
+
+        # For each instance, find the strategy with the best value (max or min depending on context)
+        for instance in metric_table.index:
+            row = metric_table.loc[instance]
+            if maximize:  # Assuming maximization, use max; otherwise change to min
+                best_strategy = row.idxmax()  # Get the strategy with the max value
+            else:
+                best_strategy = row.idxmin()  # Get the strategy with the min value
+            best_counts[best_strategy] += 1  # Increment the count for the best strategy
+
+        # Append the row for best strategy counts
+        metric_table.loc["X Best"] = pd.Series(best_counts)
+
+        # Create a color palette for the strategies
+        palette = sns.color_palette("husl", len(df1[strategy_col].unique()))
+
+        # Dynamically adjust figure height based on the number of instances
+        num_instances = df1['problem_instance'].nunique()
+        base_height = 5  # Minimum height
+        height_per_instance = 0.25  # Adjust this value to control bar spacing
+        fig_height = max(base_height, height_per_instance * num_instances)  # Calculate the figure height
+
+        # Set up the plot using Seaborn with dynamic height
+        fig = plt.figure(figsize=(10, fig_height))
+        sns.set_theme(style="whitegrid")
+
+        # Plot using Seaborn barplot
+        ax = sns.barplot(x=metric_data, y='problem_instance', hue=strategy_col,
+                         data=df1, palette=palette, orient='h')
+
+        # Set titles and labels
+        plt.title(f'{metric_col} by front strategy for each problem-instance ({problem_name})')
+        plt.xlabel(metric_col)
+        plt.ylabel('Instances')
+
+        # Add a legend
+        plt.legend(title='Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+
+        # Set the background to white and remove the grid lines
+        sns.despine(left=True, bottom=True)
+        ax.grid(False)
+
+        # Adjust layout
+        plt.tight_layout()
+
+        # Save the figure in the figs dictionary
+        figs[f"{problem_name}_metric_{metric_col}"] = fig
+        # Add to csvs for later export
+        metric_table = self._print_metric_table(metric_table, maximize)
+        csvs[f"{problem_name}_metric_{metric_col}"] = metric_table
+
+        return figs, csvs
+
+    def _print_metric_table(self, metric_table, maximize=True):
+        """
+        Helper function to print the metric table with best values highlighted in bold (for Jupyter Notebook).
+
+        Parameters:
+        - metric_table: The DataFrame containing metric values for each instance and strategy.
+        - maximize: If True, the best value is the maximum. If False, the best value is the minimum.
+        """
+
+        # Style the DataFrame to highlight the best value in each row
+        def highlight_best(s):
+            is_best = (s == s.max()) if maximize else (s == s.min())
+            return ['font-weight: bold' if v else '' for v in is_best]
+
+        # Apply the styling
+        styled_table = metric_table.style.apply(highlight_best, axis=1)
+
+        # Print the table to Jupyter Notebook
+        display(styled_table)
+
+        return metric_table  # Return the table for further use or saving
 
     # Plot certain instances to check the number of solutions in time and the hypervolume
     def plot_solutions_in_time(self, df, instances_list, figs):
@@ -481,7 +768,7 @@ class MoAnalysis:
                     print(f"Error parsing pareto_front for {solver_strategy}: {e}")
                     continue
 
-                exhaustive_star = '';
+                exhaustive_star = ''
                 if row[self.exhaustive]:
                     exhaustive_star = '*'
                 label = f"{solver_strategy} - {len(pareto_front)} points{exhaustive_star}"
@@ -611,7 +898,7 @@ class MoAnalysis:
                 # for each y value, add it to the all_y_values list
                 all_y_values.extend(y)
                 # Plot the data
-                exhaustive_star = '';
+                exhaustive_star = ''
                 if row[self.exhaustive]:
                     exhaustive_star = '*'
                 label = f"{combination} - {len(x_all_times)} points{exhaustive_star}"
@@ -628,13 +915,14 @@ class MoAnalysis:
 
     # save the data as pdf and csv
     @staticmethod
-    def save_pictures_and_tables(figs, folder_name, df_total_best_avg_score):
+    def save_pictures_and_tables(figs, folder_name, csvs):
         # Ensure the folder exists
         if not os.path.exists(folder_name):
             os.makedirs(folder_name)
 
         # save df_total_best_avg_score to a csv file
-        df_total_best_avg_score.to_csv(f'{folder_name}/df_total_best_avg_score.csv', sep=';')
+        for name, csv in csvs:
+            csv.to_csv(f'{folder_name}/{name}.csv', sep=';')
 
         for key, fig in figs.items():
             image_path = os.path.join(folder_name, f"{key}.pdf")
