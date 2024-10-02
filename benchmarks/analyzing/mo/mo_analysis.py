@@ -341,8 +341,8 @@ class MoAnalysis:
         plt.show()
         return fig
 
-    def plot_general_metric_times_best(self, df, metric_col, maximize=True, figs=None, group_by_solver=False,
-                                       csvs=None):
+    def plot_general_metric_times_best(self, df, metric_col, maximize=True, figs=None, csvs=None,
+                                       group_by_solver=False):
         """
         Generates N+1 plots and tables: N plots for each unique problem and 1 general plot considering all instances.
 
@@ -501,17 +501,15 @@ class MoAnalysis:
 
                 # Apply normalization
                 metric_data.loc[df_instance.index, 'normalized'] = df_instance[metric_col] / best_value
-                if maximize:
-                    metric_data.loc[df_instance.index, 'normalized'] = df_instance[metric_col] / best_value  # best_value / df_instance[metric_col]
-                else:
-                    metric_data.loc[df_instance.index, 'normalized'] = df_instance[metric_col] / best_value
 
             # Use the normalized values for plotting
             metric_data_values = metric_data['normalized']
 
             # Call the helper function to create the plot
-            figs, csvs = self._plot_instance_problem_helper(df_problem, metric_col, metric_data_values, maximize, figs, csvs,
-                                                            problem, group_by_solver)
+            figs, csvs = self._plot_instance_problem_helper(
+                metric_data, 'normalized', metric_data_values, maximize, figs, csvs, problem, group_by_solver,
+                is_normalized=True
+            )
 
         return figs, csvs
 
@@ -525,14 +523,14 @@ class MoAnalysis:
         """
         if metric_col in [self.time, self.time_solver_sec, "sum_solutions_resolution_time"]:
             # Convert the metric column and the timeout column to numeric, coerce invalid values to NaN
-            df[metric_col] = pd.to_numeric(df[metric_col], errors='coerce')
-            df[self.timeout] = pd.to_numeric(df[self.timeout], errors='coerce')
+            df.loc[:, metric_col] = pd.to_numeric(df[metric_col], errors='coerce')
+            df.loc[:, self.timeout] = pd.to_numeric(df[self.timeout], errors='coerce')
             # Apply the timeout limit: If the metric value exceeds the timeout, set it to the timeout
             df.loc[df[metric_col] > df[self.timeout], metric_col] = df[self.timeout]
         return df
 
     def _plot_instance_problem_helper(self, df, metric_col, metric_data, maximize, figs, csvs, problem_name,
-                                      group_by_solver):
+                                      group_by_solver, is_normalized=False):
         """
         Helper function to plot metric values for each problem and instance using Seaborn.
 
@@ -543,6 +541,7 @@ class MoAnalysis:
         - figs: Dictionary to store figures.
         - problem_name: Name of the current problem (for the title).
         - group_by_solver: If True, use solver + strategy combination on the plot.
+        - is_normalized: If True, indicates that the values are normalized and extra rows (Average, Std Dev) should be added.
         """
 
         if figs is None:
@@ -554,12 +553,11 @@ class MoAnalysis:
         # Copy the DataFrame to avoid the SettingWithCopyWarning
         df1 = df.copy()
 
-        # Handle missing values (if any) in problem or instance columns using .loc to avoid SettingWithCopyWarning
+        # Handle missing values (if any) in problem or instance columns using .loc
         df1.loc[:, self.problem] = df1[self.problem].fillna('Unknown Problem')
         df1.loc[:, self.instance] = df1[self.instance].fillna('Unknown Instance')
 
         # Ensure problem and instance are strings for concatenation
-        # df1.loc[:, 'problem_instance'] = df1[self.problem].astype(str) + ' - ' + df1[self.instance].astype(str)
         df1.loc[:, 'problem_instance'] = df1[self.instance].astype(str)
 
         # If grouping by solver and strategy, create a combined label using .loc
@@ -578,14 +576,36 @@ class MoAnalysis:
         # For each instance, find the strategy with the best value (max or min depending on context)
         for instance in metric_table.index:
             row = metric_table.loc[instance]
-            if maximize:  # Assuming maximization, use max; otherwise change to min
-                best_strategy = row.idxmax()  # Get the strategy with the max value
-            else:
-                best_strategy = row.idxmin()  # Get the strategy with the min value
-            best_counts[best_strategy] += 1  # Increment the count for the best strategy
+
+            # # Drop any NaN values before finding the best strategy
+            # row_clean = row.dropna()
+            # if row_clean.empty:
+            #     # If the row is empty after dropping NaNs, skip this instance
+            #     continue
+
+            if maximize:  # Assuming maximization
+                best_value = row.max()
+                best_strategies = row[row == best_value].index  # All strategies with the best value
+            else:  # Minimization
+                best_value = row.min()
+                best_strategies = row[row == best_value].index  # All strategies with the best value
+
+            # Increment the count for each best strategy
+            for strategy in best_strategies:
+                best_counts[strategy] += 1
+
+        # Add Average and Standard Deviation rows only if it's a normalized plot
+        if is_normalized:
+            metric_table.loc["Average"] = metric_table.mean()
+            metric_table.loc["Std Dev"] = metric_table.std()
 
         # Append the row for best strategy counts
         metric_table.loc["X Best"] = pd.Series(best_counts)
+
+        # Apply the table printing logic
+        metric_table = self._print_metric_table(metric_table, maximize)
+
+        # Now include the plotting logic
 
         # Create a color palette for the strategies
         palette = sns.color_palette("husl", len(df1[strategy_col].unique()))
@@ -597,20 +617,19 @@ class MoAnalysis:
         fig_height = max(base_height, height_per_instance * num_instances)  # Calculate the figure height
 
         # Set up the plot using Seaborn with dynamic height
-        fig = plt.figure(figsize=(10, fig_height))
+        fig, ax = plt.subplots(figsize=(10, fig_height))
         sns.set_theme(style="whitegrid")
 
         # Plot using Seaborn barplot
-        ax = sns.barplot(x=metric_data, y='problem_instance', hue=strategy_col,
-                         data=df1, palette=palette, orient='h')
+        sns.barplot(x=metric_data, y='problem_instance', hue=strategy_col, data=df1, palette=palette, orient='h', ax=ax)
 
         # Set titles and labels
-        plt.title(f'{metric_col} by front strategy for each problem-instance ({problem_name})')
-        plt.xlabel(metric_col)
-        plt.ylabel('Instances')
+        ax.set_title(f'{metric_col} by front strategy for each problem-instance ({problem_name})')
+        ax.set_xlabel(metric_col)
+        ax.set_ylabel('Instances')
 
         # Add a legend
-        plt.legend(title='Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.legend(title='Strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
 
         # Set the background to white and remove the grid lines
         sns.despine(left=True, bottom=True)
@@ -622,7 +641,6 @@ class MoAnalysis:
         # Save the figure in the figs dictionary
         figs[f"{problem_name}_metric_{metric_col}"] = fig
         # Add to csvs for later export
-        metric_table = self._print_metric_table(metric_table, maximize)
         csvs[f"{problem_name}_metric_{metric_col}"] = metric_table
 
         return figs, csvs
@@ -634,12 +652,17 @@ class MoAnalysis:
         Parameters:
         - metric_table: The DataFrame containing metric values for each instance and strategy.
         - maximize: If True, the best value is the maximum. If False, the best value is the minimum.
+        - is_normalized: If True, adds extra rows (Average, Std Dev).
         """
 
         # Style the DataFrame to highlight the best value in each row
         def highlight_best(s):
-            is_best = (s == s.max()) if maximize else (s == s.min())
-            return ['font-weight: bold' if v else '' for v in is_best]
+            if s.name == "X Best":
+                return ['font-weight: bold' if v == s.max() else '' for v in
+                        s]  # Always highlight the max in X Best row
+            else:
+                is_best = (s == s.max()) if maximize else (s == s.min())
+                return ['font-weight: bold' if v else '' for v in is_best]
 
         # Apply the styling
         styled_table = metric_table.style.apply(highlight_best, axis=1)
