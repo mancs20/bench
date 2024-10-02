@@ -360,6 +360,8 @@ class MoAnalysis:
         if csvs is None:
             csvs = {}
 
+        df = self.apply_timeout_limit(df, metric_col)
+
         # Step 1: Create a general plot considering all instances
         general_df = df  # Use the entire DataFrame for the general case
         general_problem_name = 'All instances'
@@ -379,6 +381,8 @@ class MoAnalysis:
         Plots the metric for the given problem or for all instances if `problem_name` is "All instances".
         Saves the plot and the dataframe.
         """
+        df = self.apply_timeout_limit(df, metric_col)
+
         # Group by instance to compare solvers and strategies for each instance
         grouped = df.groupby('instance')
 
@@ -461,6 +465,7 @@ class MoAnalysis:
         """
         Plot the raw metric values for each problem and instance.
         """
+        df = self.apply_timeout_limit(df, metric_col)
         problems = df[self.problem].unique()
 
         # Loop through each problem and create a plot for it
@@ -481,6 +486,7 @@ class MoAnalysis:
         Plot the normalized metric values for each problem and instance.
         Each value is normalized relative to the best value in the instance.
         """
+        df = self.apply_timeout_limit(df, metric_col)
         problems = df[self.problem].unique()
 
         # Loop through each problem and create a plot for it
@@ -508,6 +514,22 @@ class MoAnalysis:
                                                             problem, group_by_solver)
 
         return figs, csvs
+
+    def apply_timeout_limit(self, df, metric_col):
+        """
+        Apply timeout limit to the specified metric column if it's one of the time-related columns.
+
+        Parameters:
+        - df (pd.DataFrame): The DataFrame containing the metrics.
+        - metric_col (str): The name of the metric column to be checked.
+        """
+        if metric_col in [self.time, self.time_solver_sec, "sum_solutions_resolution_time"]:
+            # Convert the metric column and the timeout column to numeric, coerce invalid values to NaN
+            df[metric_col] = pd.to_numeric(df[metric_col], errors='coerce')
+            df[self.timeout] = pd.to_numeric(df[self.timeout], errors='coerce')
+            # Apply the timeout limit: If the metric value exceeds the timeout, set it to the timeout
+            df.loc[df[metric_col] > df[self.timeout], metric_col] = df[self.timeout]
+        return df
 
     def _plot_instance_problem_helper(self, df, metric_col, metric_data, maximize, figs, csvs, problem_name,
                                       group_by_solver):
