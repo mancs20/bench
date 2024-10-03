@@ -448,7 +448,7 @@ class MoAnalysis:
         ax.set_xlabel('Algorithms')
         ax.grid(False)
         ax.set_title(f"{problem_name}. Total instances: {len(df['instance'].unique())}")
-        plt.xticks(rotation=0)
+        plt.xticks(rotation=45)
         plt.tight_layout()
 
         if best_df['Shared Best'].sum() > 0:
@@ -521,7 +521,7 @@ class MoAnalysis:
         - df (pd.DataFrame): The DataFrame containing the metrics.
         - metric_col (str): The name of the metric column to be checked.
         """
-        if metric_col in [self.time, self.time_solver_sec, "sum_solutions_resolution_time"]:
+        if metric_col in [self.time, self.time_solver_sec, "sum_solutions_resolution_time(s)"]:
             # Convert the metric column and the timeout column to numeric, coerce invalid values to NaN
             df.loc[:, metric_col] = pd.to_numeric(df[metric_col], errors='coerce')
             df.loc[:, self.timeout] = pd.to_numeric(df[self.timeout], errors='coerce')
@@ -603,7 +603,8 @@ class MoAnalysis:
         metric_table.loc["X Best"] = pd.Series(best_counts)
 
         # Apply the table printing logic
-        metric_table = self._print_metric_table(metric_table, maximize)
+        print(metric_table)  # Display the table for inspection
+        # metric_table = self._print_metric_table(metric_table, maximize) // this print the formatted table only in the online Jupyter Notebook
 
         # Now include the plotting logic
 
