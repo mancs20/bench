@@ -55,6 +55,7 @@ def extract_times_choco(message):
 
 
 if __name__ == "__main__":
+    csv.field_size_limit(sys.maxsize)
     calculate_evolution_for_gavanelli = False # if the evolution of the hypervolume is not needed, set this to False, as it could take a lot of time
     output_dir = sys.argv[1]
     if output_dir[-1] == "/":
