@@ -171,3 +171,6 @@ if __name__ == "__main__":
                 for row in existing_data:
                     writer.writerow(row)
             writer.writerow(filtered_data)
+        print(f"Processed {sys.argv[2]}")
+    else:
+        print(f"Error in {sys.argv[2]}, no processing", file=sys.stderr)
