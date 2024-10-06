@@ -446,7 +446,8 @@ class MoAnalysis:
         # Add labels and title
         ax.set_ylabel(f"Number of times best : {metric_col}")
         ax.set_xlabel('Algorithms')
-        ax.grid(False)
+        ax.grid(True, axis='y')
+        ax.grid(False, axis='x')
         ax.set_title(f"{problem_name}. Total instances: {len(df['instance'].unique())}")
         plt.xticks(rotation=45)
         plt.tight_layout()
