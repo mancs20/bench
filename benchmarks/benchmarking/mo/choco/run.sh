@@ -2,11 +2,13 @@
 #SBATCH --time=00:01:00
 #SBATCH --nodes=4
 #SBATCH --partition=batch
-#SBATCH --ntasks-per-node=1 # when benchmarking sequential solver, we still book the whole node to avoid possible interference.
+#SBATCH --ntasks-per-node=8 # when benchmarking sequential solver, perform at most 8 experiments per node in aion. One experiment per socket/cpu.
+#SBATCH --ntasks-per-socket=1
+#SBATCH -c 16
 #SBATCH --exclusive
 #SBATCH --mem=0
 #SBATCH --export=ALL
-#SBATCH --output=slurm-ace.out
+#SBATCH --output=slurm-mo.out
 
 # Exits when an error occurs.
 set -e
@@ -37,8 +39,11 @@ fi
 # I. Define the campaign to run.
 
 TIMEOUT=3600
-CORES=1 # The number of core used on the node.
+CORES=${SLURM_CPUS_PER_TASK:-16}               # Number of CPUs per task. Even if not all cores are used, we book the whole node to avoid possible interference.
 THREADS=1 # The number of threads used by the solver.
+TASKS_PER_NODE=${SLURM_NTASKS_PER_NODE:-16}   # Number of tasks per node
+TASKS_PER_SOCKET=${SLURM_NTASKS_PER_SOCKET:-1} # Number of tasks per socke
+
 MACHINE=$(basename "$1" ".sh")
 INSTANCES_PATH="$BENCHMARKS_DIR_PATH/benchmarking/mo_choco.csv"
 
@@ -54,7 +59,9 @@ mkdir -p "$OUTPUT_DIR"
 # If we are on the HPC, we encapsulate the command in a srun command to reserve the resources needed.
 if [ -n "${SLURM_JOB_NODELIST}" ]; then
   SRUN_COMMAND="srun --exclusive --cpus-per-task=$CORES --nodes=1 --ntasks=1 --cpu-bind=verbose"
-  NUM_PARALLEL_EXPERIMENTS=$SLURM_JOB_NUM_NODES # How many experiments are we running in parallel? One per node per default.
+  TOTAL_PARALLEL_TASKS=$(( SLURM_JOB_NUM_NODES * TASKS_PER_NODE )) # Maximum possible tasks
+#  NUM_TASKS=$(wc -l < "$INSTANCES_PATH") # Total number of tasks in the task file
+  NUM_PARALLEL_EXPERIMENTS=$TOTAL_PARALLEL_TASKS
 else
   NUM_PARALLEL_EXPERIMENTS=1
 fi
