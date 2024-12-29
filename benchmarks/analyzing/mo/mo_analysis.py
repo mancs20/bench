@@ -9,6 +9,13 @@ from IPython.display import display
 import os
 
 
+def find_closest_time_index_to_time_t(x_all_times, id_times, t):
+    for i in range(id_times, len(x_all_times)):
+        if x_all_times[i] > t:
+            return i - 1
+    return len(x_all_times) - 1
+
+
 class MoAnalysis:
 
     def __init__(self, benchmark='benchmark', problem='problem', instance='instance', solver_name='solver',
@@ -745,7 +752,119 @@ class MoAnalysis:
             figs[fig_key] = fig
         return figs
 
-    # Plot hypervolume vs time
+    def plot_best_strategy_count_vs_time(self, df, time_points, figs):
+        df_copy = df.copy()
+        df_copy['solver_strategy'] = df_copy[[self.solver_name, self.front_strategy]].agg(' '.join, axis=1)
+
+        problem_list = df_copy[self.problem].unique()
+        all_strategy_counts_over_time = {problem: {strategy: np.zeros(len(time_points)) for strategy in
+                                                   df_copy['solver_strategy'].unique()} for problem in problem_list}
+        # Dictionary to track how many instances each strategy is the best over time
+        for problem_to_process in problem_list:
+            instances_list = df_copy[df_copy[self.problem] == problem_to_process][self.instance].unique()
+            for instance_to_process in instances_list:
+                self.get_best_strategy_count_vs_time_for_instance(df_copy, instance_to_process, time_points,
+                                                                  all_strategy_counts_over_time[problem_to_process])
+        all_strategy_counts_over_time["all_problems"] = {strategy: np.zeros(len(time_points)) for strategy in
+                                                         df_copy['solver_strategy'].unique()}
+        for problem in problem_list:
+            for strategy in df_copy['solver_strategy'].unique():
+                all_strategy_counts_over_time["all_problems"][strategy] += all_strategy_counts_over_time[problem][strategy]
+
+        generic_key = "best_strategy_count_vs_time"
+        for problem in all_strategy_counts_over_time.keys():
+            strategy_counts_over_time = all_strategy_counts_over_time[problem]
+
+            fig, ax = plt.subplots(figsize=(10, 5))
+            for strategy, counts in strategy_counts_over_time.items():
+                ax.plot(time_points, counts, label=strategy)
+
+            ax.set_xlabel('Time (seconds)')
+            ax.set_ylabel('Number of instances where strategy has best Hypervolume')
+            ax.set_title(f"Count best strategy Hypervolume vs Time - {problem}")
+            ax.legend(title='Solver strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.show()
+
+            fig_key = f"{generic_key}-{problem}"
+            figs[fig_key] = fig
+
+        return figs
+
+    def get_best_strategy_count_vs_time_for_instance(self, df_with_instance, instance, time_points,
+                                                     strategy_counts_over_time):
+        filtered_df = df_with_instance[df_with_instance[self.instance] == instance]
+
+        last_time_index_per_solver_strategy = {}
+        x_all_times_per_strategy = {}
+        hypervolumes_evolution_per_strategy = {}
+        for combination in filtered_df['solver_strategy'].unique():
+            last_time_index_per_solver_strategy[combination] = 0
+            row = filtered_df[filtered_df['solver_strategy'] == combination].iloc[0]
+            x_all_times_per_strategy[combination], hypervolumes_evolution_per_strategy[combination] = (
+                self.get_hypervolume_vs_time_values_from_table_row(row))
+
+        best_hypervolume = 0
+        for time_idx, t in enumerate(time_points):
+            best_strategies = []
+            for combination in filtered_df['solver_strategy'].unique():
+                x_all_times = x_all_times_per_strategy[combination]
+                hypervolumes = hypervolumes_evolution_per_strategy[combination]
+
+                # If no valid data, skip this strategy
+                if len(x_all_times) == 0 or len(hypervolumes) == 0:
+                    continue
+
+                if ((last_time_index_per_solver_strategy[combination] == len(x_all_times) - 1) and len(x_all_times)
+                        > 1):
+                    closest_time_idx = len(x_all_times) - 1
+                else:
+                    closest_time_idx = find_closest_time_index_to_time_t(x_all_times,
+                                                                         last_time_index_per_solver_strategy[
+                                                                             combination], t)
+                if closest_time_idx > 0:
+                    hv_at_time = hypervolumes[closest_time_idx]
+                    last_time_index_per_solver_strategy[combination] = closest_time_idx
+                else:
+                    hv_at_time = 0
+
+                if hv_at_time > best_hypervolume:
+                    best_hypervolume = hv_at_time
+                    best_strategies = [combination]
+                elif hv_at_time == best_hypervolume:
+                    best_strategies.append(combination)
+
+            # Increment count for each best strategy at this time point
+            for strategy in best_strategies:
+                strategy_counts_over_time[strategy][time_idx] += 1
+
+    def get_hypervolume_vs_time_values_from_table_row(self, row):
+        # Extract hypervolumes and times, handling "Not available." or invalid entries
+        x_all_times = []
+        hypervolumes = []
+
+        # Convert time and hypervolumes, skipping invalid entries
+        for time_str, hv_str in zip(
+                row[self.solutions_in_time].replace('[', '').replace(']', '').split(','),
+                row[self.hypervolume_evolution].replace('[', '').replace(']', '').split(',')):
+
+            time_str = time_str.strip()
+            hv_str = hv_str.strip()
+
+            # Skip if time or hypervolume is "Not available." or other invalid strings
+            if time_str.lower() == "not available." or hv_str.lower() == "not available.":
+                continue
+
+            try:
+                x_all_times.append(float(time_str))
+                hypervolumes.append(float(hv_str))
+            except ValueError:
+                # Skip any invalid values that can't be converted to float
+                continue
+
+        x_all_times = np.array(x_all_times)
+        hypervolumes = np.array(hypervolumes)
+        return x_all_times, hypervolumes
+
     def plot_hypervolume_vs_time(self, df, instances_list, figs, zoom_in_y=False):
         df_copy = df.copy()
         df_copy['solver_strategy'] = df_copy[[self.solver_name, self.front_strategy]].agg(' '.join, axis=1)
@@ -1096,3 +1215,37 @@ class Cols:
     LEX_SCORE = 'score'
     LEX_BEST = 'lex_best'
     LEX_AVG_SCORE = 'lex_average_score'
+
+
+# add main function to run the analysis
+if __name__ == '__main__':
+    csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_choco-solver.org-v4.10.14_solutions_and_stats_ukp_50_100_sims_cost_clouds_hardreset.csv"
+
+    # sims_cost_clouds-------------------------------------------------------------
+    # csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_sims_cost_clouds_3200sec_solutions_and_stats.csv"
+
+    # sims_cost_resolution----------------------------------------------------------
+    # csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_sims_cost_res_7200_solutions_and_stats.csv"
+
+    # automotive--------------------------------------------------------------------
+    # csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_automotive_7200_solutions_and_stats.csv"
+
+    analysis = MoAnalysis()
+    df = analysis.csv_to_df(csv_file_path)
+
+    # prepare folder to save data
+    figs_general_stats = {}
+    csvs = {}
+    fig_hv_time = {}
+    figs_fronts = {}
+
+    # todo for test copy code here for quick test
+    excluded_strategies = ["ParetoGavanelliGlobalConstraint"]
+    # excluded_strategies = []
+    # excluded_strategies = ['SaugmeconFrontVerify']
+    df_reduced = df[~df[analysis.front_strategy].isin(excluded_strategies)]
+    excluded_problems = ['sims_cost_resolution']
+    # excluded_problems = ['automotive', 'ukp', 'sims_cost_resolution']
+    df_reduced = df_reduced[~df_reduced[analysis.problem].isin(excluded_problems)]
+    time_points = np.linspace(0, 3700, 3700)  # start time, stop time, number of points
+    analysis.plot_best_strategy_count_vs_time(df_reduced, time_points, figs_general_stats)
