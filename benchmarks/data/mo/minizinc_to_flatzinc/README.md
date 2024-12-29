@@ -23,11 +23,15 @@ For example for a minimization problem:
 var bool: minimization;
 ```
 3. In case we are interested not only on the values of the objectives but also on the values of the decision variables,
-we should group all the decision variables in an array or set called `decisions_vars`. In the example below, the 
-decision variables are the images that you select to be part of the solution. The name should be all in upper case or all in lower case.
+we should group all the decision variables in an array or set called `decisions_vars`. Notice that flatzinc, 
+for the moment, do not maintain the name of variables representing 2D array, after flattening it will be renamed, 
+for this cases `decisions_vars` cannot be accessed, unless the 2D array is transformed to 1-dimensional array in the 
+model. In the example below, the decision variables are the images that you select to be part of the solution. 
+The name should be all in upper case or all in lower case.
 ```minizinc
 array[IMAGES] of var bool: decision_vars; % take the image i or not
 ```
+In this case the name of decision_vars will be lost when 
 4. IMPORTANT. To calculate the hypervolume indicator, we need to know the reference point. The reference point is the 
 maximum or minimum value of each objective, so bound properly the objectives.
 
@@ -37,6 +41,7 @@ To flatten the model and the data, we can use the MiniZinc command line from the
 ```bash
 minizinc -c --solver org.minizinc.mzn-fzn -I "path/to/choco/mzn_lib" model_to_flatten.mzn -d data_for_model.dzn -o output_flatzinc.fzn
 ```
+To flatten all the dzn files in one folder using one mzn file you can run the script flattening_files.sh (benchmarks/benchmarking/mo/choco/tools/flattening_files.sh) with args folder_with_dzn_mzn and mzn_name, the mzn and the dzn should be in the same folder.
 
 ### Possible issues
 At the moment of writing this document, the flattening process produces a compatibility issues with choco solver, check 
