@@ -9,7 +9,7 @@ if [ $# -eq 0 ]; then
 fi
 
 MZN_LIB_PATH="/Users/manuel.combarrosimon/choco-solver/choco-solver-4.10.14_pareto_unsatisfaction/parsers/src/main/minizinc/mzn_lib"
-MODEL_PATH="$1/sims_cost_resolution.mzn"
+MODEL_PATH="$1/$2"
 
 for file in "$1"/*.dzn; do
   if [ -f "$file" ]; then
