@@ -54,6 +54,50 @@ def extract_times_choco(message):
     return building_time, resolution_time
 
 
+def double_check_gavanelli_front_strategy_stats_are_correc_for_choco(processed_data, original_solution_details_data):
+    fields_to_check = {
+        'sum_solutions_building_time(s)': 'Building time',
+        'sum_solutions_fails': 'Fails',
+        'sum_solutions_backtracks': 'Backtracks',
+        'sum_number_solutions': 'Solutions',
+        'sum_solutions_resolution_time(s)': 'Resolution time',
+        'sum_solutions_nodes': 'Nodes',
+        'sum_solutions_restarts': 'Restarts',
+        'sum_solutions_backjumps': 'Backjumps',
+    }
+    last_solution_details_messages = original_solution_details_data[-1]
+
+    for key, value in fields_to_check.items():
+        try:
+            if key == 'sum_solutions_nodes':  # Special case for 'Nodes'
+                # Extract both the total nodes and the average nodes per second.
+                match = re.search(r'Nodes:\s*([\d,]+)\s*\(([\d,.]+)\s*n/s\)', last_solution_details_messages)
+                if match:
+                    total_nodes = int(match.group(1).replace(',', ''))
+                    average_nodes = float(match.group(2).replace(',', ''))
+                    processed_data['sum_solutions_nodes'] = total_nodes
+                    processed_data['average_node_per_second'] = average_nodes
+                else:
+                    instance_msg = processed_data.get('instance', 'Unknown instance')
+                    raise ValueError(
+                        f"Error: Field 'Nodes' not found in the last solution details message for Gavanelli instance '{instance_msg}'."
+                    )
+            else:
+                match = re.search(rf'{re.escape(value)}\s*:\s*([\d,]+(?:\.\d+)?)', last_solution_details_messages)
+                if match:
+                    value_in_message = float(match.group(1).replace(',', ''))
+                    if processed_data[key] != value_in_message:
+                        processed_data[key] = value_in_message
+                else:
+                    instance_msg = processed_data.get('instance', 'Unknown instance')
+                    raise ValueError(
+                        f"Error: Field '{value}' not found in the last solution details message for Gavanelli instance '{instance_msg}'."
+                    )
+        except ValueError as e:
+            print(e)
+            sys.exit(1)
+
+
 if __name__ == "__main__":
     csv.field_size_limit(sys.maxsize)
     calculate_evolution_for_gavanelli = False # if the evolution of the hypervolume is not needed, set this to False, as it could take a lot of time
@@ -151,6 +195,8 @@ if __name__ == "__main__":
                               in solution_details_fields})
         filtered_data.update(front_metrics)
         all_fields = list(filtered_data.keys())
+
+        double_check_gavanelli_front_strategy_stats_are_correc_for_choco(filtered_data, output["solutions-details"]["solver_messages"])
 
         output_file_exists = os.path.isfile(sol_stats_filename)
         existing_data = []
