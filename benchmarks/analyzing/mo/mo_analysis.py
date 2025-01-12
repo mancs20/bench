@@ -1,4 +1,5 @@
 import ast
+from itertools import combinations
 
 import pandas as pd
 import seaborn as sns
@@ -7,6 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from IPython.display import display
 import os
+from scipy.stats import ttest_rel, wilcoxon
 
 
 def find_closest_time_index_to_time_t(x_all_times, id_times, t):
@@ -91,7 +93,6 @@ class MoAnalysis:
         df_best_front_by_solver = pd.merge(df_best_front_by_solver, df_best_front_by_solver2,
                                            on=[self.solver_name, self.front_strategy], how='left',
                                            suffixes=('', '_new'))
-
 
         df_best_front_by_solver[Cols.LEX_BEST] = df_best_front_by_solver[f"{Cols.LEX_BEST}_new"].fillna(0).astype(int)
         df_best_front_by_solver = df_best_front_by_solver.drop(columns=f"{Cols.LEX_BEST}_new")
@@ -233,7 +234,7 @@ class MoAnalysis:
 
         # Get average scores for plotting
         df_avg_score_by_front_strategy = (df_score_by_front_strategy.groupby([self.problem, self.instance,
-                                                                             self.front_strategy])
+                                                                              self.front_strategy])
                                           [Cols.HV_SCORE].mean().reset_index())
         df_avg_score_by_front_strategy['problem_instance'] = (
                 df_avg_score_by_front_strategy[self.problem] + ' - ' + df_avg_score_by_front_strategy[self.instance]
@@ -484,12 +485,14 @@ class MoAnalysis:
             metric_data = df_problem[metric_col]
 
             # Call the helper function to create the plot
-            figs, csvs = self._plot_instance_problem_helper(df_problem, metric_col, metric_data, maximize, figs, csvs, problem,
+            figs, csvs = self._plot_instance_problem_helper(df_problem, metric_col, metric_data, maximize, figs, csvs,
+                                                            problem,
                                                             group_by_solver)
 
         return figs, csvs
 
-    def plot_metric_by_instance_problem_normalized(self, df, metric_col, maximize, figs=None, csvs=None, group_by_solver=False):
+    def plot_metric_by_instance_problem_normalized(self, df, metric_col, maximize, figs=None, csvs=None,
+                                                   group_by_solver=False):
         """
         Plot the normalized metric values for each problem and instance.
         Each value is normalized relative to the best value in the instance.
@@ -769,7 +772,8 @@ class MoAnalysis:
                                                          df_copy['solver_strategy'].unique()}
         for problem in problem_list:
             for strategy in df_copy['solver_strategy'].unique():
-                all_strategy_counts_over_time["all_problems"][strategy] += all_strategy_counts_over_time[problem][strategy]
+                all_strategy_counts_over_time["all_problems"][strategy] += all_strategy_counts_over_time[problem][
+                    strategy]
 
         generic_key = "best_strategy_count_vs_time"
         for problem in all_strategy_counts_over_time.keys():
@@ -951,6 +955,45 @@ class MoAnalysis:
 
         return figs
 
+    def check_fronts_are_equal(self, data):
+        """
+        Check if all strategies have the same Pareto front for each instance.
+        Return a boolean and, if false, the strategies and instance with discrepancies.
+        """
+        inconsistent_instances = []
+        # duplicate_issues = []
+
+        for instance, group in data.groupby(self.instance):
+            # fronts = group[self.pareto_front].apply(eval).apply(lambda x: sorted(map(tuple, x)))
+            fronts = group[self.pareto_front].apply(eval).apply(lambda x: tuple(sorted(map(tuple, x))))
+
+            # Check for duplicate elements in each front
+
+            has_duplicates = group[self.pareto_front].apply(
+                lambda x: len(x) != len(set(map(tuple, eval(x))))
+            )
+
+            # if has_duplicates.any():  # At least one strategy has duplicates
+            #     if not has_duplicates.all():  # Not all strategies have duplicates
+            #         duplicate_issues.append(instance)
+            #         continue  # Skip further checks for this instance
+            #     else:
+            #         # All strategies have duplicates; mark as a potential issue
+            #         duplicate_issues.append(instance)
+
+            # Check if all fronts are identical (including duplicates)
+            if len(fronts.unique()) > 1:  # More than one unique front
+                if group[self.exhaustive].all():  # Only consider if all strategies are exhaustive
+                    inconsistent_instances.append(instance)
+
+        if inconsistent_instances:
+            print(f"Instances with differing Pareto fronts despite being exhaustive: {inconsistent_instances}")
+            return False
+        # if duplicate_issues:
+        #     print(f"Instances with inconsistent duplicates across strategies: {duplicate_issues}")
+        #     return False
+        return True
+
     def plot_specific_front(self, df, instance_to_process, figs, margin=0.05):
         df_copy = df.copy()
         df_copy['solver_strategy'] = df_copy[[self.solver_name, self.front_strategy]].agg(' '.join, axis=1)
@@ -1027,7 +1070,8 @@ class MoAnalysis:
 
         return figs
 
-    def plot_hypervolume_evolution(self, filtered_df, ax, instance_to_process, consider_only_pareto=False, zoom_in_y=False):
+    def plot_hypervolume_evolution(self, filtered_df, ax, instance_to_process, consider_only_pareto=False,
+                                   zoom_in_y=False):
         unique_combinations = filtered_df['solver_strategy'].unique()
         ax.set_title(f'Instance: {instance_to_process}')
         all_y_values = []
@@ -1203,6 +1247,176 @@ class MoAnalysis:
         unique_values_str = unique_values_str[:-2]
         return unique_values_str
 
+    def normalize_statistics_for_metrics(self, data, metrics):
+        """
+        Normalize the statistics for the given metrics and calculate the mean and std for each strategy.
+        Return a normalized dataframe.
+        """
+        results = []
+        normalized_metric_names = []
+        for metric in metrics:
+            normalized_metric_names.append(metric.name)
+
+        for instance, group in data.groupby(self.instance):
+            normalized_group = group.copy()
+            for metric in metrics:
+                if metric.minimization:
+                    best_value = group[metric.name].min()
+                else:
+                    best_value = group[metric.name].max()
+                normalized_group[metric.name] = (group[metric.name] / best_value).fillna(1)
+
+            normalized_group = normalized_group[
+                [self.instance, self.problem, self.front_strategy] + normalized_metric_names]
+            results.append(normalized_group)
+        # Combine all normalized groups
+        normalized_data = pd.concat(results)
+        summary = normalized_data.groupby(self.front_strategy).agg(
+            {col: ['mean', 'std'] for col in normalized_metric_names}
+        )
+
+        return normalized_data, summary
+
+    def calculate_percentage_best_for_metrics(self, data, metrics):
+        """
+        Calculate the percentage of instances where each strategy was the best for each metric.
+        Return a summary dataframe.
+        """
+        best_counts = {}
+
+        for metric in metrics:
+            if metric.minimization:
+                best_strategy = data.groupby(self.instance).apply(
+                    lambda x: x.loc[x[metric.name].idxmin(), self.front_strategy]
+                )
+            else:
+                best_strategy = data.groupby(self.instance).apply(
+                    lambda x: x.loc[x[metric.name].idxmax(), self.front_strategy]
+                )
+            best_counts[metric.name] = best_strategy.value_counts(normalize=True) * 100
+
+        best_percentage = pd.DataFrame(best_counts).fillna(0)
+        return best_percentage
+
+    def compare_strategies_ttest(self, df, metric_column, strategies):
+        strategy_1 = df[df[self.front_strategy] == strategies[0]][metric_column].values
+        strategy_2 = df[df[self.front_strategy] == strategies[1]][metric_column].values
+
+        ttest_result = ttest_rel(strategy_1, strategy_2)
+        results = pd.DataFrame({
+            "Metric": [metric_column],
+            "Strategy 1": [strategies[0]],
+            "Strategy 2": [strategies[1]],
+            "T-Statistic": [ttest_result.statistic],
+            "P-Value": [ttest_result.pvalue]
+        })
+        return results
+
+    def compare_strategies_wilcoxon(self, df, metric_column, strategies):
+        strategy_1 = df[df[self.front_strategy] == strategies[0]][metric_column].values
+        strategy_2 = df[df[self.front_strategy] == strategies[1]][metric_column].values
+
+        wilcoxon_result = wilcoxon(strategy_1, strategy_2)
+        results = pd.DataFrame({
+            "Metric": [metric_column],
+            "Strategy 1": [strategies[0]],
+            "Strategy 2": [strategies[1]],
+            "W-Statistic": [wilcoxon_result.statistic],
+            "P-Value": [wilcoxon_result.pvalue]
+        })
+        return results
+
+    def pairwise_comparison_ttest_wilcoxon(self, df, metrics, strategies, alpha=0.05):
+        """
+        Perform T-Test and Wilcoxon Test for all metrics between two strategies.
+        Combine results into a single DataFrame.
+
+        Parameters:
+        - df: DataFrame containing the data.
+        - metrics: List of metrics to analyze.
+        - strategies: List of two strategies to compare.
+        - alpha: Significance level for statistical tests (default is 0.05).
+
+        Returns:
+        - A DataFrame with test results for all metrics.
+        """
+        results = []  # Store results for each metric
+
+        for metric in metrics:
+            # Extract metric values for the two strategies
+            strategy_1 = df[df[self.front_strategy] == strategies[0]][metric.name].values
+            strategy_2 = df[df[self.front_strategy] == strategies[1]][metric.name].values
+
+            # Perform T-Test
+            ttest_result = ttest_rel(strategy_1, strategy_2)
+            ttest_significant = "Yes" if ttest_result.pvalue < alpha else "No"
+
+            # Perform Wilcoxon Test
+            try:
+                wilcoxon_result = wilcoxon(strategy_1, strategy_2)
+                wilcoxon_statistic = wilcoxon_result.statistic
+                wilcoxon_pvalue = wilcoxon_result.pvalue
+                wilcoxon_significant = "Yes" if wilcoxon_result.pvalue < alpha else "No"
+            except ValueError as e:
+                wilcoxon_statistic = e
+                wilcoxon_pvalue = e
+                wilcoxon_significant = "N/A"
+                continue
+
+            # Append results for the current metric
+            results.append({
+                "Metric": metric.name,
+                "Strategy 1": strategies[0],
+                "Strategy 2": strategies[1],
+                "T-Test Statistic": ttest_result.statistic,
+                "T-Test P-Value": ttest_result.pvalue,
+                "T-Test Significant": ttest_significant,
+                "Wilcoxon Statistic": wilcoxon_statistic,
+                "Wilcoxon P-Value": wilcoxon_result,
+                "Wilcoxon Significant": wilcoxon_significant
+            })
+
+        # Convert results to a DataFrame
+        results_df = pd.DataFrame(results)
+        return results_df
+
+    def get_tables_normalized_analysis(self, data, metrics=False):
+        """
+        Perform the complete analysis, including checking Pareto fronts, normalizing statistics,
+        and calculating the percentage of best strategies.
+        """
+        # Ensure Pareto fronts are consistent
+        self.check_fronts_are_equal(data)
+
+        if not metrics:
+            metrics = self.build_metrics()
+
+        # Normalize the statistics
+        normalized_data, summary = self.normalize_statistics_for_metrics(data, metrics)
+
+        # Calculate the percentage of being the best
+        best_percentage = self.calculate_percentage_best_for_metrics(normalized_data, metrics)
+
+        # stats metrics
+        pairwise_comparison_ttest_wilcoxon = self.pairwise_comparison_ttest_wilcoxon(normalized_data, metrics,
+                                                                                     data[self.front_strategy].unique())
+
+        return normalized_data, summary, best_percentage, pairwise_comparison_ttest_wilcoxon
+
+    @staticmethod
+    def build_metrics():
+        metrics_names = [
+            "time(s)", "sum_solutions_resolution_time(s)", "sum_solutions_nodes",
+            "average_node_per_second", "sum_solutions_building_time(s)", "sum_solutions_fails",
+            "sum_solutions_backtracks", "sum_number_solutions", "sum_solutions_restarts",
+            "sum_solutions_backjumps"
+        ]
+        metrics = [Metrics(name, minimization=True) for name in metrics_names]
+        for metric in metrics:
+            if metric.name == "average_node_per_second":
+                metric.minimization = False
+        return metrics
+
 
 class Cols:
     TIME_FOR_TIME_SCORE = 'time_for_time_score'
@@ -1217,9 +1431,19 @@ class Cols:
     LEX_AVG_SCORE = 'lex_average_score'
 
 
+class Metrics:
+
+    def __init__(self, name, minimization):
+        self.name = name
+        if not minimization:
+            self.minimization = True
+        else:
+            self.minimization = minimization
+
+
 # add main function to run the analysis
 if __name__ == '__main__':
-    csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_choco-solver.org-v4.10.14_solutions_and_stats_ukp_50_100_sims_cost_clouds_hardreset.csv"
+    csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_solutions_and_stats_bi-ukp_50_sims_cost_clouds_easy.csv"
 
     # sims_cost_clouds-------------------------------------------------------------
     # csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_sims_cost_clouds_3200sec_solutions_and_stats.csv"
@@ -1240,6 +1464,18 @@ if __name__ == '__main__':
     figs_fronts = {}
 
     # todo for test copy code here for quick test
+    comparison_strategies = ['GIA', 'GIAnoGlobal']
+    comparison_strategies = ['GIA_bounded', 'GIAnoGlobal_bounded']
+    excluded_strategies = ["ParetoGavanelliGlobalConstraint"]
+
+    if comparison_strategies:
+        df_reduced = df[df[analysis.front_strategy].isin(comparison_strategies)]
+    else:
+        df_reduced = df[~df[analysis.front_strategy].isin(excluded_strategies)]
+
+    normalized_data, summary, best_percentage, pairwise_comparison_ttest_wilcoxon = analysis.get_tables_normalized_analysis(
+        df_reduced)
+
     excluded_strategies = ["ParetoGavanelliGlobalConstraint"]
     # excluded_strategies = []
     # excluded_strategies = ['SaugmeconFrontVerify']
