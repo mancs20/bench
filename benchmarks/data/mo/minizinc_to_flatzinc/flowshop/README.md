@@ -1,0 +1,1 @@
+If we want to get the decision variables we should use the mode inside the folder taillard_due_date_model_get_decision_vars, but this model is slower. If not necessary do not use it.
