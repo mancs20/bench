@@ -232,20 +232,8 @@ def double_check_non_gavanelli_front_strategy_stats_are_correct_for_choco(proces
 
 
 def double_check_gavanelli_front_strategy_stats_are_correct_for_choco(processed_data, original_solution_details_data):
-    # fields_to_check = {
-    #     'sum_solutions_building_time(s)': 'Building time',
-    #     'sum_solutions_fails': 'Fails',
-    #     'sum_solutions_backtracks': 'Backtracks',
-    #     'sum_number_solutions': 'Solutions',
-    #     'sum_solutions_resolution_time(s)': 'Resolution time',
-    #     'sum_solutions_nodes': 'Nodes',
-    #     'sum_solutions_restarts': 'Restarts',
-    #     'sum_solutions_backjumps': 'Backjumps',
-    # }
     last_solution_details_messages = original_solution_details_data[-1]
     get_stats_from_solution_message(last_solution_details_messages, processed_data)
-
-
 
 
 def get_stats_from_solution_message(solution_message, processed_data):
