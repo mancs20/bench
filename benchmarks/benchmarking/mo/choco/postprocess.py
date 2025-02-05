@@ -8,6 +8,17 @@ import numpy as np
 from pymoo.indicators.hv import Hypervolume
 import re
 
+fields_to_check = {
+    'sum_solutions_building_time(s)': 'Building time',
+    'sum_solutions_fails': 'Fails',
+    'sum_solutions_backtracks': 'Backtracks',
+    'sum_number_solutions': 'Solutions',
+    'sum_solutions_resolution_time(s)': 'Resolution time',
+    'sum_solutions_nodes': 'Nodes',
+    'sum_solutions_restarts': 'Restarts',
+    'sum_solutions_backjumps': 'Backjumps',
+}
+
 
 def process_json_file(input_json_file_path, output_stats_filename):
     with open(input_json_file_path, 'r') as file:
@@ -111,9 +122,9 @@ def process_json_file(input_json_file_path, output_stats_filename):
         all_fields.remove("reference_point")
     all_fields.append("reference_point")
 
-    if current_json_mo_solution_details:
-        double_check_gavanelli_front_strategy_stats_are_correc_for_choco(filtered_data,
-                                                                         output["solutions-details"]["solver_messages"])
+    if 'choco' in statistics['solver'] and current_json_mo_solution_details:
+        double_check_front_strategy_stats_are_correct_for_choco(filtered_data,
+                                                                output["solutions-details"]["solver_messages"])
 
     output_file_exists = os.path.isfile(output_stats_filename)
     existing_data = []
@@ -186,46 +197,91 @@ def extract_times_choco(message):
     return building_time, resolution_time
 
 
-def double_check_gavanelli_front_strategy_stats_are_correc_for_choco(processed_data, original_solution_details_data):
-    fields_to_check = {
-        'sum_solutions_building_time(s)': 'Building time',
-        'sum_solutions_fails': 'Fails',
-        'sum_solutions_backtracks': 'Backtracks',
-        'sum_number_solutions': 'Solutions',
-        'sum_solutions_resolution_time(s)': 'Resolution time',
-        'sum_solutions_nodes': 'Nodes',
-        'sum_solutions_restarts': 'Restarts',
-        'sum_solutions_backjumps': 'Backjumps',
-    }
-    last_solution_details_messages = original_solution_details_data[-1]
+def double_check_front_strategy_stats_are_correct_for_choco(processed_data, original_solution_details_data):
+    if 'gavanelli' in processed_data['front_generator'].lower():
+        double_check_gavanelli_front_strategy_stats_are_correct_for_choco(
+            processed_data, original_solution_details_data)
+    else:
+        double_check_non_gavanelli_front_strategy_stats_are_correct_for_choco(processed_data,
+                                                                              original_solution_details_data)
 
+
+def double_check_non_gavanelli_front_strategy_stats_are_correct_for_choco(processed_data,
+                                                                          original_solution_details_data):
+    check_processed_data = dict.fromkeys(fields_to_check, 0.0)
+    check_processed_data['average_node_per_second'] = 0.0
+    temp_processed_data = processed_data.copy()
+    for solution_details_message in original_solution_details_data:
+        get_stats_from_solution_message(solution_details_message, temp_processed_data)
+        for key, value in check_processed_data.items():
+            check_processed_data[key] = check_processed_data[key] + temp_processed_data[key]
+    # todo fix the average node per second and sum_solutions_building_time(s) fields
+    check_processed_data['sum_solutions_building_time(s)'] = temp_processed_data['sum_solutions_building_time(s)']
+    check_processed_data['average_node_per_second'] = (check_processed_data['average_node_per_second'] /
+                                                       len(original_solution_details_data))
+    for key, value in fields_to_check.items():
+        if processed_data[key] != check_processed_data[key]:
+            if key == 'average_node_per_second' and int(processed_data[key]) == int(check_processed_data[key]):
+                continue
+            instance_msg = processed_data.get('instance', 'Unknown instance')
+            front_generator = processed_data.get('front_generator', 'Unknown front generator')
+            raise ValueError(
+                f"Error: Field '{value}' in the solution details message for instance '{instance_msg}' for "
+                f"front generator {front_generator} does not match the value in the processed data."
+            )
+
+
+def double_check_gavanelli_front_strategy_stats_are_correct_for_choco(processed_data, original_solution_details_data):
+    # fields_to_check = {
+    #     'sum_solutions_building_time(s)': 'Building time',
+    #     'sum_solutions_fails': 'Fails',
+    #     'sum_solutions_backtracks': 'Backtracks',
+    #     'sum_number_solutions': 'Solutions',
+    #     'sum_solutions_resolution_time(s)': 'Resolution time',
+    #     'sum_solutions_nodes': 'Nodes',
+    #     'sum_solutions_restarts': 'Restarts',
+    #     'sum_solutions_backjumps': 'Backjumps',
+    # }
+    last_solution_details_messages = original_solution_details_data[-1]
+    get_stats_from_solution_message(last_solution_details_messages, processed_data)
+
+
+
+
+def get_stats_from_solution_message(solution_message, processed_data):
+    instance_msg = processed_data.get('instance', 'Unknown instance')
+    front_generator = processed_data.get('front_generator', 'Unknown front generator')
+    msg_number_match = re.search(r'Model solved # (\d+)', solution_message)
+    if msg_number_match:
+        msg_number = int(msg_number_match.group(1))
+    else:
+        raise (ValueError(f"Error: Number of model solved not found in the solution details message for instance "
+                          f"'{instance_msg}' for front strategy {front_generator}."))
+    error_msg = (f"Error: Field '{{}}' not found in the solution details message for model solved {msg_number} for "
+                 f"instance '{instance_msg}' for front strategy {front_generator}.")
     for key, value in fields_to_check.items():
         try:
             if key == 'sum_solutions_nodes':  # Special case for 'Nodes'
                 # Extract both the total nodes and the average nodes per second.
-                match = re.search(r'Nodes:\s*([\d,]+)\s*\(([\d,.]+)\s*n/s\)', last_solution_details_messages)
+                match = re.search(r'Nodes:\s*([\d,]+)\s*\(([\d,.]+)\s*n/s\)', solution_message)
                 if match:
                     total_nodes = int(match.group(1).replace(',', ''))
                     average_nodes = float(match.group(2).replace(',', ''))
                     processed_data['sum_solutions_nodes'] = total_nodes
                     processed_data['average_node_per_second'] = average_nodes
                 else:
-                    instance_msg = processed_data.get('instance', 'Unknown instance')
                     raise ValueError(
-                        f"Error: Field 'Nodes' not found in the last solution details message for Gavanelli instance "
-                        f"'{instance_msg}'."
+                        error_msg.format(value)
                     )
             else:
-                match = re.search(rf'{re.escape(value)}\s*:\s*([\d,]+(?:\.\d+)?)', last_solution_details_messages)
+                match = re.search(rf'{re.escape(value)}\s*:\s*([\d,]+(?:\.\d+)?)', solution_message)
                 if match:
                     value_in_message = float(match.group(1).replace(',', ''))
                     if processed_data[key] != value_in_message:
                         processed_data[key] = value_in_message
                 else:
-                    instance_msg = processed_data.get('instance', 'Unknown instance')
                     raise ValueError(
-                        f"Error: Field '{value}' not found in the last solution details message for Gavanelli instance "
-                        f"'{instance_msg}'."
+                        error_msg.format(value)
                     )
         except ValueError as e:
             print(e)
