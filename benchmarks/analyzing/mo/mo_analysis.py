@@ -18,6 +18,24 @@ def find_closest_time_index_to_time_t(x_all_times, id_times, t):
     return len(x_all_times) - 1
 
 
+def is_dominated(point, other_point, maximize=True):
+    for dimension in range(len(point)):
+        if maximize and point[dimension] > other_point[dimension]:
+            return False
+        elif not maximize and point[dimension] < other_point[dimension]:
+            return False
+    print(f"Point {point} is dominated by {other_point}")
+    return True
+
+
+stats = ["time(s)", "sum_solutions_resolution_time(s)", "sum_solutions_nodes",
+         "sum_solutions_backtracks", "sum_solutions_fails",
+         "sum_number_solutions"]
+stats_pretty_name = ["time(s)", "resolution_time(s)", "nodes",
+                     "backtracks", "fails",
+                     "number_solutions"]
+
+
 class MoAnalysis:
 
     def __init__(self, benchmark='benchmark', problem='problem', instance='instance', solver_name='solver',
@@ -57,6 +75,75 @@ class MoAnalysis:
     def csv_to_df(file_path):
         df = pd.read_csv(file_path, delimiter=',')
         return df
+
+    @staticmethod
+    def disjunctive_paper_style_format_row_latex(row, list_header_rows):
+        """Format a LaTeX row, making the minimum per stat column bold."""
+        formatted_row = []
+
+        data_columns_start_pos = len(list_header_rows)
+        numeric_values = row.iloc[data_columns_start_pos:].astype(float)
+
+        # Get unique statistics (e.g., "time(s)", "nodes") from column headers
+        stats_columns = {}
+        for col in row.index[data_columns_start_pos:]:
+            stat_name = col[1]  # Second level of MultiIndex (e.g., "time(s)")
+            if stat_name not in stats_columns:
+                stats_columns[stat_name] = []
+            stats_columns[stat_name].append(col)
+
+        # Compute min per statistic group
+        min_values_per_stat = {}
+        for stat, columns in stats_columns.items():
+            min_values_per_stat[stat] = numeric_values[columns].min(skipna=True)
+
+        # Format row values
+        for col, value in zip(row.index, row):
+            if col in list_header_rows:  # Keep the header columns unchanged
+                formatted_row.append(str(value))
+            else:
+                num_value = float(value) if value not in ["NaN", "nan", None] else None
+                formatted_value = MoAnalysis.format_number(num_value) if num_value is not None else ""
+
+                # Apply bold if this value is the lowest for its stat
+                stat_name = col[1]
+                if num_value == min_values_per_stat.get(stat_name, None):
+                    formatted_value = f"\\textbf{{{formatted_value}}}"
+
+                formatted_row.append(formatted_value)
+
+        return " & ".join(map(str, formatted_row)) + " \\\\"
+
+    @staticmethod
+    def disjunctive_paper_style_dataframe_to_latex(table, header_columns_list):
+        """Convert a DataFrame to a formatted LaTeX table."""
+        # Apply formatting row by row
+        latex_rows = table.apply(
+            lambda row: MoAnalysis.disjunctive_paper_style_format_row_latex(row, header_columns_list),
+            axis=1
+        ).tolist()
+
+        # Construct LaTeX table
+        latex_table = "\\begin{table}[h]\n\\centering\n\\begin{tabular}{" + "c" * len(table.columns) + "}\n\\hline\n"
+
+        # Add headers
+        header = " & ".join(["\\textbf{{{}}}".format(col[1].replace("_", "\\_")) if col[0] == "" else
+                             "\\textbf{{{} - {}}}".format(col[0].replace("_", "\\_"), col[1].replace("_", "\\_"))
+                             for col in table.columns])
+
+        latex_table += header + " \\\\\n\\hline\n"
+
+        # Add data rows
+        latex_table += "\n".join(
+            latex_rows) + "\n\\hline\n\\end{tabular}\n\\caption{Comparison of Strategies}\n\\end{table}"
+
+        return latex_table
+
+    @staticmethod
+    def format_number(x):
+        if isinstance(x, (int, float)):  # Ensure it's a number
+            return int(x) if x == int(x) else f"{x:.2f}"
+        return x  # Keep non-numeric values unchanged
 
     # Function to calculate score for each front_strategy
     def calculate_hypervolume_score(self, group):
@@ -994,6 +1081,17 @@ class MoAnalysis:
         #     return False
         return True
 
+    @staticmethod
+    def check_points_in_front_are_not_dominated(front, maximize=True):
+        dominated_points = []
+
+        for i, point in enumerate(front):
+            for j, other_point_in_front in enumerate(front):
+                if i != j and is_dominated(point, other_point_in_front, maximize):
+                    dominated_points.append(point)
+                    break
+        return dominated_points
+
     def plot_specific_front(self, df, instance_to_process, figs, margin=0.05):
         df_copy = df.copy()
         df_copy['solver_strategy'] = df_copy[[self.solver_name, self.front_strategy]].agg(' '.join, axis=1)
@@ -1403,6 +1501,18 @@ class MoAnalysis:
 
         return normalized_data, summary, best_percentage, pairwise_comparison_ttest_wilcoxon
 
+    def gets_table_comparing_average_metric_moolibrary(self, data, strategies, metrics=None):
+        if metrics is None:
+            metrics = ["time(s)",
+                       "sum_solutions_resolution_time(s)",
+                       "sum_solutions_nodes",
+                       "sum_solutions_backtracks"]
+        # group data by instance and strategy
+        grouped = data.groupby(self.instance)
+
+        # for instance, group in grouped:
+        #     for metric in metrics:
+
     @staticmethod
     def build_metrics():
         metrics_names = [
@@ -1416,6 +1526,71 @@ class MoAnalysis:
             if metric.name == "average_node_per_second":
                 metric.minimization = False
         return metrics
+
+    def average_similar_ukp_moolibrary_instances(self, df):
+        exhaustive_df, non_exhaustive_df = self.get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(df)
+        objs_elements = {3: [30, 40, 50], 4: [20, 30, 40], 5: [10, 20]}
+        avg_table_rows = []
+        for obj, list_elements in objs_elements.items():
+            for elements in list_elements:
+                # similar instances starts with a name like this: f"KP_p-{obj}_n-{element}_ins-"
+                pattern = f"KP_p-{obj}_n-{elements}_ins-"
+                exhaustive_df_filtered = exhaustive_df[exhaustive_df[self.instance].str.contains(pattern, regex=True)]
+                # Group by strategy and compute the mean
+                grouped_exhaustive = exhaustive_df_filtered.groupby(self.front_strategy).mean(
+                    numeric_only=True).reset_index()
+                # rename time column
+                for i, stat in enumerate(stats):
+                    grouped_exhaustive.rename(columns={stat: stats_pretty_name[i]}, inplace=True)
+                grouped_exhaustive["|K|"] = obj
+                grouped_exhaustive["n"] = elements
+                avg_table_rows.append(grouped_exhaustive)
+        df_avg = pd.concat(avg_table_rows, ignore_index=True)
+        return self.create_data_frame_pretty_table_like_disjunctive_paper(df_avg, stats_pretty_name)
+
+    def get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(self, df):
+        # gruop by instance
+        grouped = df.groupby(self.instance)
+        # create a two new df, one where are the instances where all the rows in the group have the value
+        # column self.exhaustive True and the other where is False or NaN
+        exhaustive_groups = []
+        non_exhaustive_groups = []
+        for instance, group in grouped:
+            exhaustive = group[self.exhaustive].unique()
+            if len(exhaustive) == 1 and bool(exhaustive[0]) is True:
+                # add the group to the exhaustive df
+                exhaustive_groups.append(group)
+            else:
+                # add the group to the non exhaustive df
+                non_exhaustive_groups.append(group)
+        keep_cols = [self.instance, self.front_strategy]
+        keep_cols.extend(stats)
+
+        exhaustive_df = pd.concat(exhaustive_groups, ignore_index=True)[keep_cols] if exhaustive_groups \
+            else pd.DataFrame(columns=df.columns)
+        # todo how to show the non exhaustive instances
+        non_exhaustive_df = pd.concat(non_exhaustive_groups, ignore_index=True)[keep_cols] if non_exhaustive_groups \
+            else pd.DataFrame(columns=df.columns)
+        return exhaustive_df, non_exhaustive_df
+
+    def create_data_frame_pretty_table_like_disjunctive_paper(self, exhaustive_df, stats_columns):
+        # create a table with the average of the similar instances
+        strategies = exhaustive_df[self.front_strategy].unique()
+        column_tuples = [("", "|K|"), ("", "n")]
+        for strategy in strategies:
+            for stat in stats_columns:
+                column_tuples.append((strategy, stat))
+        columns = pd.MultiIndex.from_tuples(column_tuples)
+        table = pd.DataFrame(columns=columns)
+        for (k, n), group in exhaustive_df.groupby(["|K|", "n"]):
+            row = [k, n]  # Start with fixed columns
+            for strategy in strategies:
+                filtered_group = group[group[self.front_strategy] == strategy]
+                row.extend(filtered_group.iloc[0][stats_columns].values)  # Get the first row of data
+            table.loc[len(table)] = row
+
+        table = table.map(self.format_number)
+        return table
 
 
 class Cols:
@@ -1443,8 +1618,14 @@ class Metrics:
 
 # add main function to run the analysis
 if __name__ == '__main__':
-    csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_solutions_and_stats_bi-ukp_50_sims_cost_clouds_easy.csv"
+    analysis = MoAnalysis()
+    # prepare folder to save data
+    figs_general_stats = {}
+    csvs = {}
+    fig_hv_time = {}
+    figs_fronts = {}
 
+    # todo for test copy code here for quick test
     # sims_cost_clouds-------------------------------------------------------------
     # csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_sims_cost_clouds_3200sec_solutions_and_stats.csv"
 
@@ -1453,35 +1634,9 @@ if __name__ == '__main__':
 
     # automotive--------------------------------------------------------------------
     # csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_automotive_7200_solutions_and_stats.csv"
-
-    analysis = MoAnalysis()
+    csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/moolibrary/ukp/mo_moolibrary_ukp_separate_search_objs_vars_all_solutions_and_stats.csv"
     df = analysis.csv_to_df(csv_file_path)
 
-    # prepare folder to save data
-    figs_general_stats = {}
-    csvs = {}
-    fig_hv_time = {}
-    figs_fronts = {}
-
-    # todo for test copy code here for quick test
-    comparison_strategies = ['GIA', 'GIAnoGlobal']
-    comparison_strategies = ['GIA_bounded', 'GIAnoGlobal_bounded']
-    excluded_strategies = ["ParetoGavanelliGlobalConstraint"]
-
-    if comparison_strategies:
-        df_reduced = df[df[analysis.front_strategy].isin(comparison_strategies)]
-    else:
-        df_reduced = df[~df[analysis.front_strategy].isin(excluded_strategies)]
-
-    normalized_data, summary, best_percentage, pairwise_comparison_ttest_wilcoxon = analysis.get_tables_normalized_analysis(
-        df_reduced)
-
-    excluded_strategies = ["ParetoGavanelliGlobalConstraint"]
-    # excluded_strategies = []
-    # excluded_strategies = ['SaugmeconFrontVerify']
-    df_reduced = df[~df[analysis.front_strategy].isin(excluded_strategies)]
-    excluded_problems = ['sims_cost_resolution']
-    # excluded_problems = ['automotive', 'ukp', 'sims_cost_resolution']
-    df_reduced = df_reduced[~df_reduced[analysis.problem].isin(excluded_problems)]
-    time_points = np.linspace(0, 3700, 3700)  # start time, stop time, number of points
-    analysis.plot_best_strategy_count_vs_time(df_reduced, time_points, figs_general_stats)
+    table_df = analysis.average_similar_ukp_moolibrary_instances(df)
+    table_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_df, ["|K|", "n"])
+    print(table_latex)
