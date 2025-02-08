@@ -1,9 +1,9 @@
 import ast
-from itertools import combinations
+from collections import Counter
 
 import pandas as pd
 import seaborn as sns
-import numpy as np  # Needed for log transformation
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from IPython.display import display
@@ -28,12 +28,34 @@ def is_dominated(point, other_point, maximize=True):
     return True
 
 
+def is_number(s):
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+
+def format_number(x):
+    if isinstance(x, (int, float)):  # Ensure it's a number
+        return int(x) if x == int(x) else f"{x:.2f}"
+    return x  # Keep non-numeric values unchanged
+
+
 stats = ["time(s)", "sum_solutions_resolution_time(s)", "sum_solutions_nodes",
          "sum_solutions_backtracks", "sum_solutions_fails",
          "sum_number_solutions"]
 stats_pretty_name = ["time(s)", "resolution_time(s)", "nodes",
                      "backtracks", "fails",
                      "number_solutions"]
+
+stats = ["time(s)", "sum_solutions_nodes",
+         "sum_solutions_backtracks"]
+stats_pretty_name = ["time(s)", "nodes",
+                     "backtracks"]
+
+stats = ["time(s)", "sum_solutions_nodes"]
+stats_pretty_name = ["time(s)", "nodes"]
 
 
 class MoAnalysis:
@@ -99,18 +121,19 @@ class MoAnalysis:
 
         # Format row values
         for col, value in zip(row.index, row):
-            if col in list_header_rows:  # Keep the header columns unchanged
-                formatted_row.append(str(value))
-            else:
+            if is_number(value):
                 num_value = float(value) if value not in ["NaN", "nan", None] else None
-                formatted_value = MoAnalysis.format_number(num_value) if num_value is not None else ""
-
+                formatted_value = format_number(num_value) if num_value is not None else ""
                 # Apply bold if this value is the lowest for its stat
                 stat_name = col[1]
-                if num_value == min_values_per_stat.get(stat_name, None):
-                    formatted_value = f"\\textbf{{{formatted_value}}}"
-
+                if stat_name not in ["NaN", "nan", None] and num_value == min_values_per_stat.get(stat_name, None):
+                    # formatted_value = f"\\textbf{{{formatted_value}}}"
+                    formatted_value = f"\\textbf{{{formatted_value}}}" if col[0] != "" else formatted_value
+                else:
+                    formatted_value = f"{formatted_value}"
                 formatted_row.append(formatted_value)
+            else:
+                formatted_row.append(str(value))
 
         return " & ".join(map(str, formatted_row)) + " \\\\"
 
@@ -124,26 +147,38 @@ class MoAnalysis:
         ).tolist()
 
         # Construct LaTeX table
-        latex_table = "\\begin{table}[h]\n\\centering\n\\begin{tabular}{" + "c" * len(table.columns) + "}\n\\hline\n"
+        latex_table = "\\begin{table}[h]\n\\centering\n\\begin{tabular}{" + "r" * len(table.columns) + "}\n\\hline\n"
 
         # Add headers
-        header = " & ".join(["\\textbf{{{}}}".format(col[1].replace("_", "\\_")) if col[0] == "" else
-                             "\\textbf{{{} - {}}}".format(col[0].replace("_", "\\_"), col[1].replace("_", "\\_"))
-                             for col in table.columns])
+        strategy_counts = Counter([col[0] for col in table.columns if col[0] != ""])  # Count occurrences of each
+        # strategy
 
-        latex_table += header + " \\\\\n\\hline\n"
+        header_first_row = []
+        col_idx = 0
+        while col_idx < len(table.columns):
+            strategy = table.columns[col_idx][0]  # Get strategy name
+            if isinstance(strategy, str) and strategy:  # Only merge strategy names, not empty headers
+                colspan = strategy_counts[strategy]  # How many columns does this strategy span?
+                header_first_row.append(
+                    "\\multicolumn{{{}}}{{c}}{{{}}}".format(colspan, strategy.replace("_", "\\_")))
+                col_idx += colspan  # Skip next columns since they are merged
+            else:
+                header_first_row.append("")  # Non-strategy columns remain the same
+                col_idx += 1
 
-        # Add data rows
+        header_first_row = " & ".join(header_first_row) + " \\\\\n"
+        header_second_row = " & ".join([
+            "{}".format(col[1].replace("_", "\\_")) for col in table.columns
+        ]) + " \\\\\n\\hline\n"
+
+        # Add headers to LaTeX table
+        latex_table += header_first_row
+        latex_table += header_second_row
+
         latex_table += "\n".join(
             latex_rows) + "\n\\hline\n\\end{tabular}\n\\caption{Comparison of Strategies}\n\\end{table}"
 
         return latex_table
-
-    @staticmethod
-    def format_number(x):
-        if isinstance(x, (int, float)):  # Ensure it's a number
-            return int(x) if x == int(x) else f"{x:.2f}"
-        return x  # Keep non-numeric values unchanged
 
     # Function to calculate score for each front_strategy
     def calculate_hypervolume_score(self, group):
@@ -1527,7 +1562,10 @@ class MoAnalysis:
                 metric.minimization = False
         return metrics
 
-    def average_similar_ukp_moolibrary_instances(self, df):
+    def average_similar_ukp_moolibrary_instances(self, df, non_stats_headers=["K", "n", "instances"]):
+        if "|k|" not in non_stats_headers and "n" not in non_stats_headers:
+            raise Exception("The non_stats_headers must contain the following: 'K', 'n'. Which represents the number "
+                            "of objectives and the number of items in the knapsack.")
         exhaustive_df, non_exhaustive_df = self.get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(df)
         objs_elements = {3: [30, 40, 50], 4: [20, 30, 40], 5: [10, 20]}
         avg_table_rows = []
@@ -1542,11 +1580,15 @@ class MoAnalysis:
                 # rename time column
                 for i, stat in enumerate(stats):
                     grouped_exhaustive.rename(columns={stat: stats_pretty_name[i]}, inplace=True)
-                grouped_exhaustive["|K|"] = obj
+                grouped_exhaustive["K"] = obj
                 grouped_exhaustive["n"] = elements
+                if "instances" in non_stats_headers:
+                    total_instances = len(df[self.instance][df[self.instance].str.contains(pattern, regex=True)].unique())
+                    averaged_instances = len(exhaustive_df_filtered[self.instance].unique())
+                    grouped_exhaustive["instances"] = f"{averaged_instances}/{total_instances}"
                 avg_table_rows.append(grouped_exhaustive)
         df_avg = pd.concat(avg_table_rows, ignore_index=True)
-        return self.create_data_frame_pretty_table_like_disjunctive_paper(df_avg, stats_pretty_name)
+        return self.create_data_frame_pretty_table_like_disjunctive_paper(df_avg, stats_pretty_name, non_stats_headers)
 
     def get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(self, df):
         # gruop by instance
@@ -1557,7 +1599,8 @@ class MoAnalysis:
         non_exhaustive_groups = []
         for instance, group in grouped:
             exhaustive = group[self.exhaustive].unique()
-            if len(exhaustive) == 1 and bool(exhaustive[0]) is True:
+            # if len(exhaustive) == 1 and bool(exhaustive[0]) is True:
+            if len(exhaustive) == 1 and not (pd.isna(exhaustive[0])):
                 # add the group to the exhaustive df
                 exhaustive_groups.append(group)
             else:
@@ -1573,23 +1616,26 @@ class MoAnalysis:
             else pd.DataFrame(columns=df.columns)
         return exhaustive_df, non_exhaustive_df
 
-    def create_data_frame_pretty_table_like_disjunctive_paper(self, exhaustive_df, stats_columns):
-        # create a table with the average of the similar instances
+    def create_data_frame_pretty_table_like_disjunctive_paper(self, exhaustive_df, stats_columns, non_stats_headers):
         strategies = exhaustive_df[self.front_strategy].unique()
-        column_tuples = [("", "|K|"), ("", "n")]
+        column_tuples = []
+        for header in non_stats_headers:
+            column_tuples.append((np.nan, header))
+
         for strategy in strategies:
             for stat in stats_columns:
                 column_tuples.append((strategy, stat))
         columns = pd.MultiIndex.from_tuples(column_tuples)
+
         table = pd.DataFrame(columns=columns)
-        for (k, n), group in exhaustive_df.groupby(["|K|", "n"]):
-            row = [k, n]  # Start with fixed columns
+        for group_keys, group in exhaustive_df.groupby(non_stats_headers):
+            row = list(group_keys)
             for strategy in strategies:
                 filtered_group = group[group[self.front_strategy] == strategy]
-                row.extend(filtered_group.iloc[0][stats_columns].values)  # Get the first row of data
+                row.extend(filtered_group.iloc[0][stats_columns].values)
             table.loc[len(table)] = row
 
-        table = table.map(self.format_number)
+        table = table.map(format_number)
         return table
 
 
@@ -1637,6 +1683,7 @@ if __name__ == '__main__':
     csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/moolibrary/ukp/mo_moolibrary_ukp_separate_search_objs_vars_all_solutions_and_stats.csv"
     df = analysis.csv_to_df(csv_file_path)
 
-    table_df = analysis.average_similar_ukp_moolibrary_instances(df)
-    table_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_df, ["|K|", "n"])
+    non_stats_headers = ["K", "n", "instances"]
+    table_df = analysis.average_similar_ukp_moolibrary_instances(df, non_stats_headers)
+    table_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_df, non_stats_headers)
     print(table_latex)
