@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -x
+# set -x
 
 # Check if a directory was provided as an argument
 if [ $# -eq 0 ]; then
