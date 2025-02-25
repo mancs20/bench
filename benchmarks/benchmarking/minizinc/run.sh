@@ -41,7 +41,7 @@ MZN_TIMEOUT=120
 CORES=1 # The number of core used on the node.
 THREADS=1 # The number of threads used by the solver.
 MACHINE=$(basename "$1" ".sh")
-INSTANCES_PATH="$BENCHMARKS_DIR_PATH/benchmarking/mzn2023.csv"
+INSTANCES_PATH="$BENCHMARKS_DIR_PATH/benchmarking/all_rcpsp_plib.csv"
 
 # II. Prepare the command lines and output directory.
 MZN_COMMAND="minizinc --solver $MZN_SOLVER -s --json-stream -i -t $MZN_TIMEOUT --output-mode json --output-time --output-objective -f -p $THREADS"
