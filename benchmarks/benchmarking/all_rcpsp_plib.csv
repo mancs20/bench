@@ -1,0 +1,3 @@
+"problem","model","data_file"
+"rcpsp","../data/minizinc-benchmarks/rcpsp/rcpsp.mzn","../data/minizinc-benchmarks/rcpsp/data_psplib/j30/J30_1_1.dzn"
+"rcpsp","../data/minizinc-benchmarks/rcpsp/rcpsp.mzn","../data/minizinc-benchmarks/rcpsp/data_psplib/j30/J30_1_2.dzn"
