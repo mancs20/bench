@@ -37,7 +37,7 @@ fi
 
 MZN_SOLVER="org.choco.choco"
 VERSION="v4.10.14" # Note that this is only for the naming of the output directory, we do not verify the actual version of the solver.
-MZN_TIMEOUT=120
+MZN_TIMEOUT=120000 # The timeout in milliseconds.
 CORES=1 # The number of core used on the node.
 THREADS=1 # The number of threads used by the solver.
 MACHINE=$(basename "$1" ".sh")
