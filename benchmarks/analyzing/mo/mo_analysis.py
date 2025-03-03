@@ -1590,6 +1590,64 @@ class MoAnalysis:
         df_avg = pd.concat(avg_table_rows, ignore_index=True)
         return self.create_data_frame_pretty_table_like_disjunctive_paper(df_avg, stats_pretty_name, non_stats_headers)
 
+    def average_similar_bi_ukp_voptlib_instances(self, df, non_stats_headers=["K", "n", "instances"]):
+        if "|k|" not in non_stats_headers and "n" not in non_stats_headers:
+            raise Exception("The non_stats_headers must contain the following: 'K', 'n'. Which represents the number "
+                            "of objectives and the number of items in the knapsack.")
+        exhaustive_df, non_exhaustive_df = self.get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(df)
+        objs_elements = {2: [50]}
+        avg_table_rows = []
+        for obj, list_elements in objs_elements.items():
+            for elements in list_elements:
+                # similar instances starts with a name like this: f"KP_p-{obj}_n-{element}_ins-"
+                pattern = f"KP_p-{obj}_n-{elements}_ins-"
+                pattern = "K5050W"
+                exhaustive_df_filtered = exhaustive_df[exhaustive_df[self.instance].str.contains(pattern, regex=True)]
+                # Group by strategy and compute the mean
+                grouped_exhaustive = exhaustive_df_filtered.groupby(self.front_strategy).mean(
+                    numeric_only=True).reset_index()
+                # rename time column
+                for i, stat in enumerate(stats):
+                    grouped_exhaustive.rename(columns={stat: stats_pretty_name[i]}, inplace=True)
+                grouped_exhaustive["K"] = obj
+                grouped_exhaustive["n"] = elements
+                if "instances" in non_stats_headers:
+                    total_instances = len(df[self.instance][df[self.instance].str.contains(pattern, regex=True)].unique())
+                    averaged_instances = len(exhaustive_df_filtered[self.instance].unique())
+                    grouped_exhaustive["instances"] = f"{averaged_instances}/{total_instances}"
+                avg_table_rows.append(grouped_exhaustive)
+        df_avg = pd.concat(avg_table_rows, ignore_index=True)
+        return self.create_data_frame_pretty_table_like_disjunctive_paper(df_avg, stats_pretty_name, non_stats_headers)
+
+    def average_similar_nqueens_instances(self, df, non_stats_headers=["K", "n", "instances"]):
+        if "|k|" not in non_stats_headers and "n" not in non_stats_headers:
+            raise Exception("The non_stats_headers must contain the following: 'K', 'n'. Which represents the number "
+                            "of objectives and the number of queens.")
+        exhaustive_df, non_exhaustive_df = self.get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(df)
+        objs_elements = {2: [8, 10, 12, 14], 3: [8, 10, 12, 14], 4: [8, 10, 12, 14], 5: [8, 10, 12, 14]}
+        avg_table_rows = []
+        for obj, list_queens in objs_elements.items():
+            for queens in list_queens:
+                # similar instances starts with a name like this: f"KP_p-{obj}_n-{element}_ins-"
+                pattern = f"n_queens_p-{obj}_q-{queens}_ins-"
+                exhaustive_df_filtered = exhaustive_df[exhaustive_df[self.instance].str.contains(pattern, regex=True)]
+                # Group by strategy and compute the mean
+                grouped_exhaustive = exhaustive_df_filtered.groupby(self.front_strategy).mean(
+                    numeric_only=True).reset_index()
+                # rename time column
+                for i, stat in enumerate(stats):
+                    grouped_exhaustive.rename(columns={stat: stats_pretty_name[i]}, inplace=True)
+                grouped_exhaustive["K"] = obj
+                grouped_exhaustive["n"] = queens
+                if "instances" in non_stats_headers:
+                    total_instances = len(df[self.instance][df[self.instance].str.contains(pattern, regex=True)].unique())
+                    averaged_instances = len(exhaustive_df_filtered[self.instance].unique())
+                    grouped_exhaustive["instances"] = f"{averaged_instances}/{total_instances}"
+                avg_table_rows.append(grouped_exhaustive)
+        df_avg = pd.concat(avg_table_rows, ignore_index=True)
+        return self.create_data_frame_pretty_table_like_disjunctive_paper(df_avg, stats_pretty_name, non_stats_headers)
+
+
     def get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(self, df):
         # gruop by instance
         grouped = df.groupby(self.instance)
