@@ -1,6 +1,6 @@
 #!/bin/bash -l
-#SBATCH --time=00:08:00
-#SBATCH --nodes=45
+#SBATCH --time=00:07:00
+#SBATCH --nodes=30
 #SBATCH --partition=batch
 #SBATCH --ntasks-per-node=16 # when benchmarking sequential solver, we still book the whole node to avoid possible interference.
 #SBATCH --exclusive
@@ -37,7 +37,7 @@ fi
 
 MZN_SOLVER="org.choco.choco"
 VERSION="v4.10.14" # Note that this is only for the naming of the output directory, we do not verify the actual version of the solver.
-MZN_TIMEOUT=180000 # The timeout in milliseconds.
+MZN_TIMEOUT=300000 # The timeout in milliseconds.
 CORES=1 # The number of core used on the node.
 THREADS=1 # The number of threads used by the solver.
 MACHINE=$(basename "$1" ".sh")
