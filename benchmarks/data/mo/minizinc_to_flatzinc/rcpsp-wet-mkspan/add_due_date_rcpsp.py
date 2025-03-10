@@ -175,9 +175,12 @@ if __name__ == "__main__":
     # get current directory
     due_date_factor = 2.5
     current_directory = os.path.dirname(os.path.abspath(__file__))
+    directory_psplib = "minizinc_psplib_due_dates"
+    directory_psplib = os.path.join(current_directory, directory_psplib)
     folder_name = ["j30", "j60", "j90", "j120"]
+    # folder_name = ["test"]
     for folder in folder_name:
-        folder_path = os.path.join(current_directory, folder)
+        folder_path = os.path.join(directory_psplib, folder)
         process_folder(folder_path, due_date_factor)
         print("Done! in folder: ", folder)
 

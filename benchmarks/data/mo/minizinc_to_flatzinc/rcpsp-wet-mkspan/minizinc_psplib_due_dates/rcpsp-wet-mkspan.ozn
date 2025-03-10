@@ -1,0 +1,7 @@
+output ["decision_vars = ",showDzn(decision_vars),";\n","makespan = ",showDzn(makespan),";\n","wet = ",showDzn(wet),";\n","minimization = ",showDzn(minimization),";\n","objs = ",showDzn(objs),";\n"];
+array [1..2] of int: objs;
+bool: minimization;
+set of int: Tasks = 1..92;
+int: wet;
+int: makespan;
+array [Tasks] of int: decision_vars;
