@@ -78,14 +78,22 @@ def process_json_file(input_json_file_path, output_stats_filename):
         if "reference_point" in current_json_mo_solution_details:
             reference_point = current_json_mo_solution_details.get("reference_point", None)
             current_json_mo_solution_details.pop("reference_point", None)
-            hypervolume = calculate_hypervolume(np.array(current_json_mo_solution_details.get('pareto_front')),
-                                                np.array(reference_point))
+            # verify if the last point in the pareto front is non-dominated by the front. If the timeout is reached the
+            # algorithms will return the approximate solution as the last point in the front, which is not necessarily
+            # non-dominated.
+            pareto_front = get_true_non_dominated_front(np.array(current_json_mo_solution_details.get('pareto_front')),
+                                                        current_json_mo_solution_details.get('exhaustive'),
+                                                        reference_point)
+            if len(pareto_front) != len(current_json_mo_solution_details.get('pareto_front')):
+                # pareto_front to string to avoid numpy array serialization issues
+                current_json_mo_solution_details['pareto_front'] = pareto_front.tolist()
+            hypervolume = calculate_hypervolume(pareto_front, np.array(reference_point))
             front_metrics.update({"hypervolume": hypervolume})
             if 'all_solutions' in current_json_mo_solution_details:
                 solutions = current_json_mo_solution_details.get('all_solutions')
             else:
-                solutions = current_json_mo_solution_details.get('pareto_front')
-            front_metrics.update({"front_cardinality": len(current_json_mo_solution_details.get('pareto_front'))})
+                solutions = pareto_front
+            front_metrics.update({"front_cardinality": len(pareto_front)})
             # calculate hypervolume evolution
             if calculate_evolution and (calculate_evolution_for_gavanelli or filtered_data['front_generator'] !=
                                         'ParetoGavanelliGlobalConstraint'):
@@ -160,13 +168,37 @@ def is_valid_json(json_str):
         return False
 
 
-def calculate_hypervolume(front, reference_point):
-    # check if it is a maximization problem
+def is_maximization_problem(front, reference_point):
     if len(front) > 1:
         comparisson_array = reference_point < front[1]
     else:
         comparisson_array = reference_point < front[0]
-    if comparisson_array[0]:
+    return comparisson_array[0]
+
+
+def dominates(point, test_point, maximization):
+    if maximization:
+        return np.all(point >= test_point) and np.any(point > test_point)
+    else:
+        return np.all(point <= test_point) and np.any(point < test_point)
+
+
+def get_true_non_dominated_front(pareto_front, exhaustive, reference_point):
+    if not exhaustive:
+        # remove the last point if it is dominated by the rest of the front
+        maximization = is_maximization_problem(pareto_front, reference_point)
+        for index, point in enumerate(pareto_front):
+            if index == len(pareto_front) - 2:
+                break
+            if dominates(point, pareto_front[-1], maximization):
+                pareto_front = pareto_front[:-1]
+                break
+    return pareto_front
+
+
+def calculate_hypervolume(front, reference_point):
+    # check if it is a maximization problem
+    if is_maximization_problem(front, reference_point):
         # convert maximization to minimization to calculate the Hypervolume using the pymoo library
         reference_point = -reference_point
         front = -front
