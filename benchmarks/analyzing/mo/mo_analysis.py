@@ -58,6 +58,30 @@ stats = ["time(s)", "sum_solutions_nodes", "front_cardinality"]
 stats_pretty_name = ["time(s)", "nodes"]
 
 
+def get_info_similar_instances_ukp_moolibrary():
+    objs_elements = {3: [30, 40, 50], 4: [20, 30, 40], 5: [10, 20]}
+    pattern_template = "KP_p-{obj}_n-{elements}_ins-"
+    return objs_elements, pattern_template
+
+
+def get_info_similar_instances_bi_ukp_voptlib():
+    objs_elements = {2: [50]}
+    pattern_template = "K5050W"
+    return objs_elements, pattern_template
+
+
+def get_info_similar_instances_nqueens():
+    objs_elements = {2: [8, 10, 12, 14], 3: [8, 10, 12, 14], 4: [8, 10, 12, 14], 5: [8, 10, 12, 14]}
+    pattern_template = "n_queens_p-{obj}_q-{elements}_ins-"
+    return objs_elements, pattern_template
+
+
+def get_info_similar_instances_rcpsp():
+    objs_elements = {2: [30, 60, 90]}
+    pattern_template = "J{elements}"
+    return objs_elements, pattern_template
+
+
 class MoAnalysis:
 
     def __init__(self, benchmark='benchmark', problem='problem', instance='instance', solver_name='solver',
@@ -493,8 +517,8 @@ class MoAnalysis:
         df = self.apply_timeout_limit(df, metric_col)
 
         # Step 1: Create a general plot considering all instances
-        general_df = df  # Use the entire DataFrame for the general case
         general_problem_name = 'All instances'
+        general_df = self.apply_timeout_limit(df, metric_col)  # Use the entire DataFrame for the general case
         self.plot_metric_for_problem(general_df, metric_col, maximize, group_by_solver, general_problem_name, figs,
                                      csvs)
 
@@ -502,19 +526,74 @@ class MoAnalysis:
         problems = df['problem'].unique()  # Get unique problems
         for problem in problems:
             df_problem = df[df['problem'] == problem]  # Filter DataFrame for the current problem
+            df_problem = self.apply_timeout_limit(df_problem, metric_col)
             self.plot_metric_for_problem(df_problem, metric_col, maximize, group_by_solver, problem, figs, csvs)
 
         return figs, csvs
 
-    def plot_metric_for_problem(self, df, metric_col, maximize, group_by_solver, problem_name, figs, csvs):
-        """
-        Plots the metric for the given problem or for all instances if `problem_name` is "All instances".
-        Saves the plot and the dataframe.
-        """
-        df = self.apply_timeout_limit(df, metric_col)
+    def get_strategy_times_best_for_similar_instances_rcpsp(self, df, non_stats_headers, metric, maximize=True):
+        objs_elements, pattern_template = get_info_similar_instances_rcpsp()
+        return self.get_strategy_times_best_for_similar_instances(objs_elements, pattern_template, df,
+                                                                  metric, maximize, non_stats_headers=None)
 
+    def get_strategy_times_best_for_similar_instances(self, objs_elements, pattern_template, df,
+                                                      metric, maximize=True, non_stats_headers=None):
+
+        if non_stats_headers is None:
+            non_stats_headers = ["K", "n", "Instances"]
+        if "K" not in non_stats_headers or "n" not in non_stats_headers:
+            raise Exception("The non_stats_headers must contain the following: 'K', 'n'. Which represent the number "
+                            "of objectives and the number of items/queens.")
+
+        stats = ["Times best", "Exhaustive"]
+        best_table_rows = []
+        for obj, list_elements in objs_elements.items():
+            for elements in list_elements:
+                # Create the instance name pattern dynamically
+                pattern = pattern_template.format(obj=obj, elements=elements)
+
+                # Filter instances based on the pattern
+                df_similar_instances = df[df[self.instance].str.contains(pattern, regex=True)]
+                if not df_similar_instances.empty:
+                    best_count, absolute_best_count, shared_best_count = self.get_best_strategies_absolute_shared(df_similar_instances,
+                                                                                                                  metric,
+                                                                                                                  maximize,
+                                                                                                                  False)
+                    # For each strategy, count the number of times exhaustive is true in the similar instances
+                    # Count total instances per strategy
+                    # total_similar_instances = df_similar_instances.groupby(self.front_strategy).size()
+                    total_exhaustive = df_similar_instances.groupby(self.front_strategy)[self.exhaustive].sum()
+                    # Merge both counts into a single DataFrame
+                    # df_exhaustive = pd.DataFrame({
+                    #     self.front_strategy: total_exhaustive.index,
+                    #     'Exhaustive': total_exhaustive.astype(str) + "/" + total_similar_instances.astype(str)
+                    # }).reset_index(drop=True)
+
+                    df_best = pd.DataFrame({
+                        self.front_strategy: list(best_count.keys()),  # Front strategy or solver + front based on grouping
+                        'Times best': list(best_count.values()),
+                    })
+                    # Merge `df_best` with `total_exhaustive` on `self.front_strategy`
+                    df_combined = pd.merge(df_best, total_exhaustive, on=self.front_strategy, how="outer").fillna("0/0")
+                    # non_stats_headers = ["K", "n", "Instances"]
+                    df_combined["K"] = obj
+                    df_combined["n"] = elements
+                    df_combined["Instances"] = len(df_similar_instances[self.instance].unique())
+                    # rename exhaustive column
+                    df_combined.rename(columns={self.exhaustive: stats[1]}, inplace=True)
+
+                    best_table_rows.append(df_combined)
+
+        # Concatenate all results into a single DataFrame
+        if len(best_table_rows) == 0:
+            exit("Something is wrong the results are empty")
+        df_best_final = pd.concat(best_table_rows, ignore_index=True)
+
+        return self.create_data_frame_pretty_table_like_disjunctive_paper(df_best_final, stats, non_stats_headers)
+
+    def get_best_strategies_absolute_shared(self, df, metric_col, maximize=True, group_by_solver=False):
         # Group by instance to compare solvers and strategies for each instance
-        grouped = df.groupby('instance')
+        grouped = df.groupby(self.instance)
 
         # Initialize dictionaries to store the number of best occurrences for each strategy
         best_count = {}
@@ -551,6 +630,16 @@ class MoAnalysis:
             best_count[strategy] = (
                     absolute_best_count.get(strategy, 0) + shared_best_count.get(strategy, 0)
             )
+        return best_count, absolute_best_count, shared_best_count
+
+    def plot_metric_for_problem(self, df, metric_col, maximize, group_by_solver, problem_name, figs, csvs):
+        """
+        Plots the metric for the given problem or for all instances if `problem_name` is "All instances".
+        Saves the plot and the dataframe.
+        """
+        best_count, absolute_best_count, shared_best_count = self.get_best_strategies_absolute_shared(df, metric_col,
+                                                                                                      maximize,
+                                                                                                      group_by_solver)
 
         # Convert the best_count dictionaries to pandas DataFrame for saving
         best_df = pd.DataFrame({
@@ -1598,22 +1687,25 @@ class MoAnalysis:
 
                     avg_table_rows.append(grouped_exhaustive)
 
+        if len(avg_table_rows) == 0:
+            exit("There are no instances that are exhaustive for all the strategies")
         df_avg = pd.concat(avg_table_rows, ignore_index=True)
         return self.create_data_frame_pretty_table_like_disjunctive_paper(df_avg, stats_pretty_name, non_stats_headers)
 
     def average_similar_ukp_moolibrary_instances(self, df, non_stats_headers=None):
-        objs_elements = {3: [30, 40, 50], 4: [20, 30, 40], 5: [10, 20]}
-        pattern_template = "KP_p-{obj}_n-{elements}_ins-"
+        objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
         return self.average_similar_instances(df, objs_elements, pattern_template, non_stats_headers)
 
     def average_similar_bi_ukp_voptlib_instances(self, df, non_stats_headers=None):
-        objs_elements = {2: [50]}
-        pattern_template = "K5050W"
+        objs_elements, pattern_template = get_info_similar_instances_bi_ukp_voptlib()
         return self.average_similar_instances(df, objs_elements, pattern_template, non_stats_headers)
 
     def average_similar_nqueens_instances(self, df, non_stats_headers=None):
-        objs_elements = {2: [8, 10, 12, 14], 3: [8, 10, 12, 14], 4: [8, 10, 12, 14], 5: [8, 10, 12, 14]}
-        pattern_template = "n_queens_p-{obj}_q-{elements}_ins-"
+        objs_elements, pattern_template = get_info_similar_instances_nqueens()
+        return self.average_similar_instances(df, objs_elements, pattern_template, non_stats_headers)
+
+    def average_similar_rcpsp_instances(self, df, non_stats_headers=None):
+        objs_elements, pattern_template = get_info_similar_instances_rcpsp()
         return self.average_similar_instances(df, objs_elements, pattern_template, non_stats_headers)
 
     def get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(self, df):
@@ -1626,7 +1718,7 @@ class MoAnalysis:
         for instance, group in grouped:
             exhaustive = group[self.exhaustive].unique()
             # if len(exhaustive) == 1 and bool(exhaustive[0]) is True:
-            if len(exhaustive) == 1 and not (pd.isna(exhaustive[0])):
+            if len(exhaustive) == 1 and not (pd.isna(exhaustive[0])) and bool(exhaustive[0]) is True:
                 # add the group to the exhaustive df
                 exhaustive_groups.append(group)
             else:
