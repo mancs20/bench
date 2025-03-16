@@ -1798,10 +1798,21 @@ if __name__ == '__main__':
 
     # automotive--------------------------------------------------------------------
     # csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_automotive_7200_solutions_and_stats.csv"
-    csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/moolibrary/ukp/mo_moolibrary_ukp_separate_search_objs_vars_all_solutions_and_stats.csv"
-    df = analysis.csv_to_df(csv_file_path)
 
-    non_stats_headers = ["K", "n", "instances"]
-    table_df = analysis.average_similar_ukp_moolibrary_instances(df, non_stats_headers)
+    #rcpsp saugmecon gavanelli
+    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/gavanelli-saugmecon-fixed/rcpsp_gavanelli_saugmecon_solutions_and_stats.csv"
+    df = pd.read_csv(csv_file_path)
+
+    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/gavanelli-saugmecon-fixed/rcpsp_gavanelli_saugmecon_solutions_and_stats.csv"
+    df_rcpsp = analysis.csv_to_df(csv_file_path)
+    non_stats_headers = ["K", "n", "Instances"]
+    metric = "hypervolume"
+    table_df_best = analysis.get_strategy_times_best_for_similar_instances_rcpsp(df_rcpsp, non_stats_headers, metric,
+                                                                                 maximize=True)
+    table_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_df_best, non_stats_headers)
+    print(table_latex)
+
+    non_stats_headers = ["K", "n", "instances", "p"]
+    table_df = analysis.average_similar_rcpsp_instances(df, non_stats_headers)
     table_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_df, non_stats_headers)
     print(table_latex)
