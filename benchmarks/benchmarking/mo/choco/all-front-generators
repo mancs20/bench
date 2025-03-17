@@ -6,6 +6,7 @@ BiObjGIA_sparsity
 BiObjGIA_sparsityBounded
 BiObjGIA_regionImplementation
 ParetoGavanelliGlobalConstraint
+ParetoGavanelliGlobalConstraintNoEvolutionInfo
 ParetoDisjunctiveProgramming
 Saugmecon
 SaugmeconFrontVerify
