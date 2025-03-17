@@ -73,8 +73,15 @@ def process_json_file(input_json_file_path, output_stats_filename):
         print(f"No experiment data for: {instance_file}. File: {sys.argv[2]}", file=sys.stderr)
 
     reference_point = False
-    # if current_json_mo_solution_details:
     if 'pareto_front' in current_json_mo_solution_details:
+        # simple verification if the search was exhaustive. If the last search was incomplete exhaustive has to be False
+        if "exhaustive" in current_json_mo_solution_details:
+            exhaustive = current_json_mo_solution_details.get("exhaustive")
+            if exhaustive:
+                # if current_json_mo_solution_details['solver_messages'][-1].find("Incomplete search") != -1:
+                if "Incomplete search" in current_json_mo_solution_details['solver_messages'][-1]:
+                    current_json_mo_solution_details['exhaustive'] = False
+
         if "reference_point" in current_json_mo_solution_details:
             reference_point = current_json_mo_solution_details.get("reference_point", None)
             current_json_mo_solution_details.pop("reference_point", None)
