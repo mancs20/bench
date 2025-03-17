@@ -1800,25 +1800,32 @@ class MoAnalysis:
         # Get exhaustive and non-exhaustive data
         exhaustive_df, non_exhaustive_df = self.get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(df)
 
+        data_to_return = [None, None]
         # Process exhaustive instances
         non_stats_headers = ["K", "n", "instances", "p"]
         df_exhaustive = self.average_similar_instances(exhaustive_df, objs_elements, pattern_template, non_stats_headers,
                                                        is_exhaustive=True)
-        if df_exhaustive is None:
-            exit("There are no instances that are exhaustive for all the strategies")
+        if df_exhaustive is not None:
+            data_exhaustive = self.create_data_frame_pretty_table_like_disjunctive_paper(df_exhaustive, stats_pretty_name,
+                                                                       non_stats_headers)
+            data_to_return[0] = data_exhaustive
+        else:
+            print("No exhaustive instances found.")
 
         # Process non-exhaustive instances
         non_exhaustive_headers = ["K", "n", "instances"]  # Modified headers
         df_non_exhaustive = self.average_similar_instances(non_exhaustive_df, objs_elements, pattern_template,
                                                            non_exhaustive_headers, is_exhaustive=False)
 
-        return [
-            self.create_data_frame_pretty_table_like_disjunctive_paper(df_exhaustive, stats_pretty_name,
-                                                                       non_stats_headers),
-            self.create_data_frame_pretty_table_like_disjunctive_paper(df_non_exhaustive,
+        if df_non_exhaustive is not None:
+            data_non_exhaustive = self.create_data_frame_pretty_table_like_disjunctive_paper(df_non_exhaustive,
                                                                        stats_non_exhaustive_pretty_name,
-                                                                       non_exhaustive_headers),
-        ]
+                                                                       non_exhaustive_headers)
+            data_to_return[1] = data_non_exhaustive
+        else:
+            print("No non-exhaustive instances found.")
+
+        return data_to_return
 
     def average_similar_ukp_moolibrary_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
