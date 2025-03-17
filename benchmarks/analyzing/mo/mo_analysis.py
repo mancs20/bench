@@ -57,6 +57,9 @@ stats_pretty_name = ["time(s)", "nodes",
 stats = ["time(s)", "sum_solutions_nodes", "front_cardinality"]
 stats_pretty_name = ["time(s)", "nodes"]
 
+stats_non_exhaustive = ["hypervolume", "front_cardinality", "exhaustive"]
+stats_non_exhaustive_pretty_name = ["Hypervolume", "Pareto points", "Exhaustive"]
+
 
 def get_info_similar_instances_ukp_moolibrary():
     objs_elements = {3: [30, 40, 50], 4: [20, 30, 40], 5: [10, 20]}
@@ -123,7 +126,7 @@ class MoAnalysis:
         return df
 
     @staticmethod
-    def disjunctive_paper_style_format_row_latex(row, list_header_rows):
+    def disjunctive_paper_style_format_row_latex(row, list_header_rows, minimize=True):
         """Format a LaTeX row, making the minimum per stat column bold."""
         formatted_row = []
 
@@ -139,9 +142,12 @@ class MoAnalysis:
             stats_columns[stat_name].append(col)
 
         # Compute min per statistic group
-        min_values_per_stat = {}
+        values_per_stat_to_highlight = {}
         for stat, columns in stats_columns.items():
-            min_values_per_stat[stat] = numeric_values[columns].min(skipna=True)
+            if minimize:
+                values_per_stat_to_highlight[stat] = numeric_values[columns].min(skipna=True)
+            else:
+                values_per_stat_to_highlight[stat] = numeric_values[columns].max(skipna=True)
 
         # Format row values
         for col, value in zip(row.index, row):
@@ -150,7 +156,7 @@ class MoAnalysis:
                 formatted_value = format_number(num_value) if num_value is not None else ""
                 # Apply bold if this value is the lowest for its stat
                 stat_name = col[1]
-                if stat_name not in ["NaN", "nan", None] and num_value == min_values_per_stat.get(stat_name, None):
+                if stat_name not in ["NaN", "nan", None] and num_value == values_per_stat_to_highlight.get(stat_name, None):
                     # formatted_value = f"\\textbf{{{formatted_value}}}"
                     formatted_value = f"\\textbf{{{formatted_value}}}" if col[0] != "" else formatted_value
                 else:
@@ -162,11 +168,11 @@ class MoAnalysis:
         return " & ".join(map(str, formatted_row)) + " \\\\"
 
     @staticmethod
-    def disjunctive_paper_style_dataframe_to_latex(table, header_columns_list):
+    def disjunctive_paper_style_dataframe_to_latex(table, header_columns_list, minimize=True, title="Comparison of Strategies"):
         """Convert a DataFrame to a formatted LaTeX table."""
         # Apply formatting row by row
         latex_rows = table.apply(
-            lambda row: MoAnalysis.disjunctive_paper_style_format_row_latex(row, header_columns_list),
+            lambda row: MoAnalysis.disjunctive_paper_style_format_row_latex(row, header_columns_list, minimize),
             axis=1
         ).tolist()
 
@@ -200,7 +206,7 @@ class MoAnalysis:
         latex_table += header_second_row
 
         latex_table += "\n".join(
-            latex_rows) + "\n\\hline\n\\end{tabular}\n\\caption{Comparison of Strategies}\n\\end{table}"
+            latex_rows) + "\n\\hline\n\\end{tabular}\n\\caption{" + title + "}\n\\end{table}"
 
         return latex_table
 
@@ -530,6 +536,33 @@ class MoAnalysis:
             self.plot_metric_for_problem(df_problem, metric_col, maximize, group_by_solver, problem, figs, csvs)
 
         return figs, csvs
+
+    def get_strategy_times_best_for_similar_instances_ukp(self, df, non_stats_headers, metric, maximize=True):
+        objs_list = []
+        pattern_list = []
+        objs_elements_vol, pattern_template_vol = get_info_similar_instances_bi_ukp_voptlib()
+        objs_list.append(objs_elements_vol)
+        pattern_list.append(pattern_template_vol)
+        objs_elements_mol, pattern_template_mol = get_info_similar_instances_ukp_moolibrary()
+        objs_list.append(objs_elements_mol)
+        pattern_list.append(pattern_template_mol)
+        table_list = []
+        for i in range(len(objs_list)):
+            objs_elements = objs_list[i]
+            pattern_template = pattern_list[i]
+            table = self.get_strategy_times_best_for_similar_instances(objs_elements, pattern_template, df,
+                                                               metric, maximize, non_stats_headers=None)
+            table_list.append(table)
+        # Concatenate all results into a single DataFrame
+        if len(table_list) == 0:
+            exit("Something is wrong the results are empty")
+        df_best_final = pd.concat(table_list, ignore_index=True)
+        return df_best_final
+
+    def get_strategy_times_best_for_similar_instances_nqueens(self, df, non_stats_headers, metric, maximize=True):
+        objs_elements, pattern_template = get_info_similar_instances_rcpsp()
+        return self.get_strategy_times_best_for_similar_instances(objs_elements, pattern_template, df,
+                                                                  metric, maximize, non_stats_headers=None)
 
     def get_strategy_times_best_for_similar_instances_rcpsp(self, df, non_stats_headers, metric, maximize=True):
         objs_elements, pattern_template = get_info_similar_instances_rcpsp()
@@ -1651,62 +1684,114 @@ class MoAnalysis:
                 metric.minimization = False
         return metrics
 
-    def average_similar_instances(self, df, objs_elements, pattern_template, non_stats_headers=None):
-        if non_stats_headers is None:
-            non_stats_headers = ["K", "n", "instances", "p"]
-        if "K" not in non_stats_headers or "n" not in non_stats_headers:
-            raise Exception("The non_stats_headers must contain the following: 'K', 'n'. Which represent the number "
-                            "of objectives and the number of items/queens.")
-        exhaustive_df, non_exhaustive_df = self.get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(df)
+    def process_similar_instances_for_average(self, df, obj, elements, pattern, non_stats_headers,
+                                              is_exhaustive=True):
+        df_filtered = df[df[self.instance].str.contains(pattern, regex=True)]
+        if df_filtered.empty:
+            return None
+
+        if is_exhaustive:
+            stats_depending_exhaustive = stats.copy()
+            stats_pretty_name_depending_exhaustive = stats_pretty_name
+        else:
+            stats_depending_exhaustive = stats_non_exhaustive
+            stats_pretty_name_depending_exhaustive = stats_non_exhaustive_pretty_name
+
+        agg_dict = {col: "mean" for col in stats_depending_exhaustive}
+        if not is_exhaustive:
+            agg_dict["exhaustive"] = "sum"
+        grouped_df = df_filtered.groupby(self.front_strategy, as_index=False).agg(agg_dict)
+
+        # Handle front_cardinality only for exhaustive cases
+        if is_exhaustive:
+            average_number_pareto_optimal = grouped_df["front_cardinality"].iloc[0]
+            del grouped_df["front_cardinality"]
+            # Rename columns
+            if "p" in non_stats_headers and is_exhaustive:
+                grouped_df["p"] = average_number_pareto_optimal
+            stats_depending_exhaustive.remove("front_cardinality")
+
+        for i, stat in enumerate(stats_depending_exhaustive):
+            grouped_df.rename(columns={stat: stats_pretty_name_depending_exhaustive[i]}, inplace=True)
+
+        # Add metadata columns
+        grouped_df["K"] = obj
+        grouped_df["n"] = elements
+        if "instances" in non_stats_headers:
+            total_instances = len(df[self.instance][df[self.instance].str.contains(pattern, regex=True)].unique())
+            averaged_instances = len(df_filtered[self.instance].unique())
+            grouped_df["instances"] = f"{averaged_instances}/{total_instances}"
+
+        return grouped_df
+
+    def average_similar_instances(self, df, objs_elements, pattern_template, non_stats_headers,
+                                  is_exhaustive=True):
         avg_table_rows = []
         for obj, list_elements in objs_elements.items():
             for elements in list_elements:
-                # Create the instance name pattern dynamically
                 pattern = pattern_template.format(obj=obj, elements=elements)
+                df_result = self.process_similar_instances_for_average(df, obj, elements, pattern, non_stats_headers, is_exhaustive)
+                if df_result is not None:
+                    avg_table_rows.append(df_result)
 
-                # Filter instances based on the pattern
-                exhaustive_df_filtered = exhaustive_df[exhaustive_df[self.instance].str.contains(pattern, regex=True)]
-                if not exhaustive_df_filtered.empty:
-                    # Group by strategy and compute the mean
-                    grouped_exhaustive = exhaustive_df_filtered.groupby(self.front_strategy).mean(
-                        numeric_only=True).reset_index()
-                    average_number_pareto_optimal = grouped_exhaustive["front_cardinality"].iloc[0]
-                    del grouped_exhaustive["front_cardinality"]
-                    # rename time column
-                    stats_without_cardinality = [stat for stat in stats if stat != "front_cardinality"]
-                    for i, stat in enumerate(stats_without_cardinality):
-                        grouped_exhaustive.rename(columns={stat: stats_pretty_name[i]}, inplace=True)
-                    grouped_exhaustive["K"] = obj
-                    grouped_exhaustive["n"] = elements
-                    if "instances" in non_stats_headers:
-                        total_instances = len(df[self.instance][df[self.instance].str.contains(pattern, regex=True)].unique())
-                        averaged_instances = len(exhaustive_df_filtered[self.instance].unique())
-                        grouped_exhaustive["instances"] = f"{averaged_instances}/{total_instances}"
-                    if "p" in non_stats_headers:
-                        grouped_exhaustive["p"] = average_number_pareto_optimal
+        if not avg_table_rows:
+            return None
 
-                    avg_table_rows.append(grouped_exhaustive)
+        return pd.concat(avg_table_rows, ignore_index=True)
 
-        if len(avg_table_rows) == 0:
+    def average_similar_instances_exhaustive_nonexhaustive(self, df, objs_elements, pattern_template, non_stats_headers=None):
+        """
+        Computes the average statistics for both exhaustive and non-exhaustive instances.
+
+        :param df: DataFrame containing data.
+        :param objs_elements: Dictionary mapping objectives to decision variables in the problem (n).
+        :param pattern_template: Template for instance name patterns.
+        :param non_stats_headers: Headers for the problem date, objectives, n, etc.
+        :return: List of DataFrames [exhaustive_results, non_exhaustive_results].
+        """
+        if non_stats_headers is None:
+            non_stats_headers = ["K", "n", "instances", "p"]
+        if "K" not in non_stats_headers or "n" not in non_stats_headers:
+            raise Exception("The non_stats_headers must contain 'K' and 'n'.")
+
+        # Get exhaustive and non-exhaustive data
+        exhaustive_df, non_exhaustive_df = self.get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(df)
+
+        # Process exhaustive instances
+        non_stats_headers = ["K", "n", "instances", "p"]
+        df_exhaustive = self.average_similar_instances(exhaustive_df, objs_elements, pattern_template, non_stats_headers,
+                                                       is_exhaustive=True)
+        if df_exhaustive is None:
             exit("There are no instances that are exhaustive for all the strategies")
-        df_avg = pd.concat(avg_table_rows, ignore_index=True)
-        return self.create_data_frame_pretty_table_like_disjunctive_paper(df_avg, stats_pretty_name, non_stats_headers)
+
+        # Process non-exhaustive instances
+        non_exhaustive_headers = ["K", "n", "instances"]  # Modified headers
+        df_non_exhaustive = self.average_similar_instances(non_exhaustive_df, objs_elements, pattern_template,
+                                                           non_exhaustive_headers, is_exhaustive=False)
+
+        return [
+            self.create_data_frame_pretty_table_like_disjunctive_paper(df_exhaustive, stats_pretty_name,
+                                                                       non_stats_headers),
+            self.create_data_frame_pretty_table_like_disjunctive_paper(df_non_exhaustive,
+                                                                       stats_non_exhaustive_pretty_name,
+                                                                       non_exhaustive_headers),
+        ]
 
     def average_similar_ukp_moolibrary_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
-        return self.average_similar_instances(df, objs_elements, pattern_template, non_stats_headers)
+        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
 
     def average_similar_bi_ukp_voptlib_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_bi_ukp_voptlib()
-        return self.average_similar_instances(df, objs_elements, pattern_template, non_stats_headers)
+        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
 
     def average_similar_nqueens_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_nqueens()
-        return self.average_similar_instances(df, objs_elements, pattern_template, non_stats_headers)
+        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
 
     def average_similar_rcpsp_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_rcpsp()
-        return self.average_similar_instances(df, objs_elements, pattern_template, non_stats_headers)
+        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
 
     def get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(self, df):
         # gruop by instance
@@ -1730,6 +1815,8 @@ class MoAnalysis:
         exhaustive_df = pd.concat(exhaustive_groups, ignore_index=True)[keep_cols] if exhaustive_groups \
             else pd.DataFrame(columns=df.columns)
         # todo how to show the non exhaustive instances
+        keep_cols = [self.instance, self.front_strategy]
+        keep_cols.extend(stats_non_exhaustive)
         non_exhaustive_df = pd.concat(non_exhaustive_groups, ignore_index=True)[keep_cols] if non_exhaustive_groups \
             else pd.DataFrame(columns=df.columns)
         return exhaustive_df, non_exhaustive_df
