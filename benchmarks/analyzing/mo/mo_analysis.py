@@ -58,7 +58,7 @@ stats = ["time(s)", "sum_solutions_nodes", "front_cardinality"]
 stats_pretty_name = ["time(s)", "nodes"]
 
 stats_non_exhaustive = ["hypervolume", "front_cardinality", "exhaustive"]
-stats_non_exhaustive_pretty_name = ["Hypervolume", "Pareto points", "Exhaustive"]
+stats_non_exhaustive_pretty_name = ["Hyp", "Points", "Compl"]
 
 
 def get_info_similar_instances_ukp_moolibrary():
@@ -126,6 +126,45 @@ class MoAnalysis:
         return df
 
     @staticmethod
+    def count_common_digits(values):
+        """Finds how many leading digits are the same in all values (excluding exponent)."""
+        values = sorted(abs(v) for v in values if v >= 10**4)  # Ignore small numbers
+        if len(values) < 2:
+            return 0  # No comparison possible with one or no values
+
+        str_values = [f"{v:.15e}" for v in values]  # Convert to high-precision scientific notation
+        min_len = min(len(s) for s in str_values)
+
+        common_digits = 0
+        for i in range(min_len):
+            if all(s[i] == str_values[0][i] for s in str_values[1:]):
+                common_digits += 1
+            else:
+                break
+
+        return max(0, common_digits - 2)  # Subtract exponent and decimal point
+
+    @staticmethod
+    def format_number_dynamic(num, values_in_column, base_precision=5, min_precision=2):
+        """Formats number in scientific notation, ensuring at least two extra digits beyond common digits."""
+        if num is None or np.isnan(num):
+            return ""
+
+        if num < 10**4:  # Keep normal formatting for small numbers
+            return format_number(num)
+
+        exponent = int(np.floor(np.log10(abs(num))))  # Get exponent
+        coefficient = num / (10 ** exponent)  # Normalize to get coefficient
+
+        # Compute required precision dynamically
+        common_digits = MoAnalysis.count_common_digits(values_in_column)
+
+        precision = max(min_precision, common_digits + 2)  # Ensure 2 extra digits
+        precision = min(precision, base_precision)  # Don't exceed base precision
+
+        return f"{coefficient:.{precision}f} \\times 10^{{{exponent}}}"
+
+    @staticmethod
     def disjunctive_paper_style_format_row_latex(row, list_header_rows, minimize=True):
         """Format a LaTeX row, making the minimum per stat column bold."""
         formatted_row = []
@@ -153,12 +192,16 @@ class MoAnalysis:
         for col, value in zip(row.index, row):
             if is_number(value):
                 num_value = float(value) if value not in ["NaN", "nan", None] else None
-                formatted_value = format_number(num_value) if num_value is not None else ""
+                # Get values for this stat if available, otherwise use just the current number
+                column_values = numeric_values[stats_columns[col[1]]] if col[1] in stats_columns else [num_value]
+                formatted_value = (
+                    f"${MoAnalysis.format_number_dynamic(num_value, column_values, base_precision=6, min_precision=2)}$"
+                    if num_value is not None else ""
+                )
                 # Apply bold if this value is the lowest for its stat
                 stat_name = col[1]
                 if stat_name not in ["NaN", "nan", None] and num_value == values_per_stat_to_highlight.get(stat_name, None):
-                    # formatted_value = f"\\textbf{{{formatted_value}}}"
-                    formatted_value = f"\\textbf{{{formatted_value}}}" if col[0] != "" else formatted_value
+                    formatted_value = f"$\\mathbf{{{formatted_value.strip('$')}}}$" if col[0] != "" else formatted_value
                 else:
                     formatted_value = f"{formatted_value}"
                 formatted_row.append(formatted_value)
