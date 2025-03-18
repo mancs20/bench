@@ -1831,6 +1831,41 @@ class MoAnalysis:
         objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
         return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
 
+    def average_similar_ukp_moolibrary_voptlib_instances(self, df, non_stats_headers=None):
+        objs_list = []
+        pattern_list = []
+        objs_elements_vol, pattern_template_vol = get_info_similar_instances_bi_ukp_voptlib()
+        objs_list.append(objs_elements_vol)
+        pattern_list.append(pattern_template_vol)
+        objs_elements_mol, pattern_template_mol = get_info_similar_instances_ukp_moolibrary()
+        objs_list.append(objs_elements_mol)
+        pattern_list.append(pattern_template_mol)
+        table_list_exhaustive = []
+        table_list_non_exhaustive = []
+        for i in range(len(objs_list)):
+            objs_elements = objs_list[i]
+            pattern_template = pattern_list[i]
+            table = self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
+            # table is a list with 2 dataframes, one for exhaustive and one for non-exhaustive
+            if table[0] is not None:
+                table_list_exhaustive.append(table[0])
+            if table[1] is not None:
+                table_list_non_exhaustive.append(table[1])
+        # Concatenate all results into a single DataFrame
+        if len(table_list_exhaustive) > 1:
+            table_list_exhaustive = pd.concat(table_list_exhaustive, ignore_index=True)
+        elif len(table_list_exhaustive) == 0:
+            table_list_exhaustive = None
+        else:
+            table_list_exhaustive = table_list_exhaustive[0]
+        if len(table_list_non_exhaustive) > 1:
+            table_list_non_exhaustive = pd.concat(table_list_non_exhaustive, ignore_index=True)
+        elif len(table_list_non_exhaustive) == 0:
+            table_list_non_exhaustive = None
+        else:
+            table_list_non_exhaustive = table_list_non_exhaustive[0]
+        return [table_list_exhaustive, table_list_non_exhaustive]
+
     def average_similar_bi_ukp_voptlib_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_bi_ukp_voptlib()
         return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
@@ -1890,6 +1925,7 @@ class MoAnalysis:
                 row.extend(filtered_group.iloc[0][stats_columns].values)
             table.loc[len(table)] = row
 
+        table = table.fillna(0)
         table = table.map(format_number)
         return table
 
