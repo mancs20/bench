@@ -85,6 +85,12 @@ def get_info_similar_instances_rcpsp():
     return objs_elements, pattern_template
 
 
+def get_info_similar_instances_sims():
+    objs_elements = {2: [30, 50, 100, 150, 200], 3: [30, 50, 100, 150, 200]}
+    pattern_template = "_{elements}"
+    return objs_elements, pattern_template
+
+
 class MoAnalysis:
 
     def __init__(self, benchmark='benchmark', problem='problem', instance='instance', solver_name='solver',
@@ -1878,6 +1884,10 @@ class MoAnalysis:
         objs_elements, pattern_template = get_info_similar_instances_rcpsp()
         return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
 
+    def average_similar_sims_instances(self, df, non_stats_headers=None):
+        objs_elements, pattern_template = get_info_similar_instances_sims()
+        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
+
     def get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(self, df):
         # gruop by instance
         grouped = df.groupby(self.instance)
@@ -1976,9 +1986,29 @@ if __name__ == '__main__':
     csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/gavanelli-saugmecon-fixed/rcpsp_gavanelli_saugmecon_solutions_and_stats.csv"
     df = pd.read_csv(csv_file_path)
 
-    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/gavanelli-saugmecon-fixed/rcpsp_gavanelli_saugmecon_solutions_and_stats.csv"
-    df_rcpsp = analysis.csv_to_df(csv_file_path)
-    non_stats_headers = ["K", "n", "Instances"]
+    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/ukp/gia_versions/gia_versions_objective_manager/mo_gia_versions_objective_manager_solutions_and_stats.csv"
+    df = analysis.csv_to_df(csv_file_path)
+
+    non_stats_headers = None  # they are inside the code
+    title_exhaustive = "Comparison strategies when all exhaustive"
+    title_non_exhaustive = "Comparison strategies when not all exhaustive"
+    # todo replace analysis.average_similar_nqueens_instances by the corresponding function for the problem
+    table_results = analysis.average_similar_ukp_moolibrary_voptlib_instances(df, non_stats_headers)
+    if table_results[0] is not None:
+        non_stats_headers = ["K", "n", "instances", "p"]
+        table_exhaustive_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_results[0],
+                                                                                     non_stats_headers, True,
+                                                                                     title_exhaustive)
+        print(table_exhaustive_latex)
+    if table_results[1] is not None:
+        non_stats_headers = ["K", "n", "instances"]
+        table_non_exhaustive_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_results[1],
+                                                                                         non_stats_headers, False,
+                                                                                         title_non_exhaustive)
+        print("---------------Comparison strategies when not all exhaustive----------------------")
+        print(table_non_exhaustive_latex)
+
+
     metric = "hypervolume"
     table_df_best = analysis.get_strategy_times_best_for_similar_instances_rcpsp(df_rcpsp, non_stats_headers, metric,
                                                                                  maximize=True)
