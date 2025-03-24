@@ -1,5 +1,6 @@
 import os
 import shutil
+import re
 
 
 def copy_file_dzn(src_path, dest_dir, append_to_name):
@@ -28,13 +29,18 @@ def add_file_experiment_path_to_csv(benchmark_name, problem, instances, input_di
         raise ValueError("The input_dir path must contain the data folder, /data/mo/")
     instances_path = [0] * len(instances)
 
+    if not os.path.exists(output_file):
+        with open(output_file, "w") as file:
+            file.write('"benchmark_name","problem","instance","instance_path"\n')
+
     for id_instance, instance in enumerate(instances):
         print(f"Searching for instance {instance} in the input_dir with id {id_instance}...")
         found_instance = False
         for root, dirs, files in os.walk(input_dir):
             for file in files:
                 # check if the file has the right extension file
-                if instance in file:
+                pattern = re.escape(instance) + r"(?!\d)"
+                if re.search(pattern, file):
                     if extension is False or file.endswith(f".{extension}"):
                         instances_path[id_instance] = os.path.join(root, file)
                         found_instance = True
