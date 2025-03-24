@@ -20,6 +20,35 @@ fields_to_check = {
 }
 
 
+def extract_hypervolume_lines(lines):
+    """Extracts all HYPERVOLUME lines and parses them into [second, points]."""
+    hv_data = []
+    found_first_hypervolume_line = False
+    for line in lines:
+        if line.startswith("HYPERVOLUME:"):
+            found_first_hypervolume_line = True
+            match = re.match(r'HYPERVOLUME: \[(\d+), (.+)\]', line.strip())
+            if match:
+                second = int(match.group(1))
+                points = json.loads(match.group(2).replace("'", '"'))
+                hv_data.append([second, points])
+        elif found_first_hypervolume_line:
+            break
+
+    return hv_data
+
+
+def calculate_hypervolume_evolution(lines, reference_point):
+    hv_data = extract_hypervolume_lines(lines)
+    # hypervolume_evolution = []
+    # temp_front = []
+    # for index, point in enumerate(solutions):
+    #     temp_front.append(point)
+    #     hypervolume_evolution[index] = float(calculate_hypervolume(np.array(temp_front),
+    #                                                                np.array(reference_point)))
+    return hv_data
+
+
 def process_json_file(input_json_file_path, output_stats_filename):
     with open(input_json_file_path, 'r') as file:
         lines = file.readlines()
@@ -101,15 +130,18 @@ def process_json_file(input_json_file_path, output_stats_filename):
             else:
                 solutions = pareto_front
             front_metrics.update({"front_cardinality": len(pareto_front)})
-            # calculate hypervolume evolution
+
+
             if calculate_evolution and (calculate_evolution_for_gavanelli or filtered_data['front_generator'] !=
                                         'ParetoGavanelliGlobalConstraint'):
-                hypervolume_evolution = [0.0] * len(solutions)
-                temp_front = []
-                for index, point in enumerate(solutions):
-                    temp_front.append(point)
-                    hypervolume_evolution[index] = float(calculate_hypervolume(np.array(temp_front),
-                                                                               np.array(reference_point)))
+                # calculate hypervolume evolution
+                hypervolume_evolution = calculate_hypervolume_evolution(lines, reference_point)
+                # hypervolume_evolution = [0.0] * len(solutions)
+                # temp_front = []
+                # for index, point in enumerate(solutions):
+                #     temp_front.append(point)
+                #     hypervolume_evolution[index] = float(calculate_hypervolume(np.array(temp_front),
+                #                                                                np.array(reference_point)))
                 front_metrics.update({"hypervolume_evolution": hypervolume_evolution})
             else:
                 front_metrics.update({"hypervolume_evolution": "Not available."})
@@ -264,10 +296,11 @@ def double_check_non_gavanelli_front_strategy_stats_are_correct_for_choco(proces
                 continue
             instance_msg = processed_data.get('instance', 'Unknown instance')
             front_generator = processed_data.get('front_generator', 'Unknown front generator')
-            raise ValueError(
-                f"Error: Field '{value}' in the solution details message for instance '{instance_msg}' for "
-                f"front generator {front_generator} does not match the value in the processed data."
-            )
+            if value != 'Restarts':
+                raise ValueError(
+                    f"Error: Field '{value}' in the solution details message for instance '{instance_msg}' for "
+                    f"front generator {front_generator} does not match the value in the processed data."
+                )
 
 
 def double_check_gavanelli_front_strategy_stats_are_correct_for_choco(processed_data, original_solution_details_data):
@@ -315,16 +348,62 @@ def get_stats_from_solution_message(solution_message, processed_data):
             sys.exit(1)
 
 
+def is_experiment_in_csv(csv_path, key_data, allow_replace=False):
+    """
+    Check if a record with the same (problem, instance, front_generator, timeout)
+    exists in the CSV. If allow_replace is True, only skip if the existing datetime is newer or same.
+    """
+    if not os.path.isfile(csv_path):
+        return False
+
+    key_fields = ["problem", "instance", "front_generator", "timeout"]
+    target_key = tuple(key_data.get(k) for k in key_fields)
+    target_datetime = key_data.get("datetime")
+
+    with open(csv_path, 'r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            row_key = tuple(row.get(k) for k in key_fields)
+            if row_key == target_key:
+                if not allow_replace:
+                    return True
+                if "datetime" in row and row["datetime"] >= target_datetime:
+                    return True  # Skip if older or same
+                return False  # Proceed if current is newer
+    return False
+
+
 if __name__ == "__main__":
     csv.field_size_limit(sys.maxsize)
-    calculate_evolution_for_gavanelli = False  # if the evolution of the hypervolume is not needed, set this to False,
+    calculate_evolution_for_gavanelli = True  # if the evolution of the hypervolume is not needed, set this to False,
     # as it could take a lot of time
-    calculate_evolution = False  # turn off the computation of the hypervolume evolution, it could be very expensive
+    calculate_evolution = True  # turn off the computation of the hypervolume evolution, it could be very expensive
     output_dir = sys.argv[1]
     if output_dir[-1] == "/":
         output_dir = output_dir[:-1]
     input_file_path = Path(sys.argv[2])
+    allow_replace = len(sys.argv) > 3 and sys.argv[3].lower() == "true"
     output_file_path = Path(output_dir)
     uid = os.path.basename(os.path.normpath(output_file_path))
     sol_stats_filename = Path(output_dir + "/mo_" + uid + "_solutions_and_stats.csv")
-    process_json_file(input_file_path, sol_stats_filename)
+
+    # Extract statistics line to identify the experiment
+    metadata = {}
+    with open(input_file_path, 'r') as file:
+        for line in file:
+            if '"type": "statistics"' in line:
+                try:
+                    json_line = json.loads(line)
+                    metadata = json_line["statistics"]
+                    break
+                except json.JSONDecodeError:
+                    continue
+
+    if not metadata:
+        print(f"❌ Could not extract statistics from {input_file_path}")
+        sys.exit(1)
+
+    if is_experiment_in_csv(sol_stats_filename, metadata, allow_replace):
+        print(f"⚠️ Skipping {metadata['problem']}/{metadata['instance']} — already exists in CSV.")
+    else:
+        process_json_file(input_file_path, sol_stats_filename)

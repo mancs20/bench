@@ -11,6 +11,7 @@ fi
 for file in "$1"/*.json; do
   if [ -f "$file" ]; then
     python3 postprocess.py "$1" "$file"
+    # python3 postprocess.py "$1" "$file" "true" # to overwrite results that are already present
   else
     echo "No .json files found in the directory."
     exit 1
