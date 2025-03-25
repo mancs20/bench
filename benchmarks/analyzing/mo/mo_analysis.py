@@ -1953,17 +1953,18 @@ class MoAnalysis:
         # df_problem = df[df[self.problem] == problem_name]
         df_problem = df
         strategies = df_problem[self.front_strategy].unique()
-        strategy_colors = dict(zip(strategies, sns.color_palette("husl", len(strategies))))
-        number_of_points = math.ceil(df_problem[self.time].max())
-        time_points = np.linspace(0, df_problem[self.time].max(), number_of_points)
+        strategy_colors = dict(zip(strategies, sns.color_palette("colorblind", len(strategies))))
+        strategy_markers = dict(zip(strategies, ['o', 's', '^', 'D', 'X', '*']))  # added
 
-        overall_counts = {strategy: np.zeros(len(time_points)) for strategy in strategies}
+        overall_times = {strategy: [] for strategy in strategies}
+        overall_counts = {strategy: [] for strategy in strategies}
 
         for obj, elements_list in objs_elements.items():
             fig, ax = plt.subplots(figsize=(10, 6))
             title = f"{problem_name} - {obj} objectives"
 
-            local_counts = {strategy: np.zeros(len(time_points)) for strategy in strategies}
+            local_times = {strategy: [] for strategy in strategies}
+            local_counts = {strategy: [] for strategy in strategies}
 
             for elements in elements_list:
                 pattern = pattern_template.format(obj=obj, elements=elements)
@@ -1983,18 +1984,28 @@ class MoAnalysis:
                         if not row[self.exhaustive]:
                             continue
                         resolution_time = min(row[self.time], row[self.timeout])
-                        for i, t in enumerate(time_points):
-                            if resolution_time <= t:
-                                local_counts[strategy][i:] += 1
-                                overall_counts[strategy][i:] += 1
-                                break
+                        local_times[strategy].append(resolution_time)
+                        overall_times[strategy].append(resolution_time)
 
-            # Plot for current objective
+            # Sort and count
             for strategy in strategies:
-                ax.plot(time_points, local_counts[strategy], label=strategy, color=strategy_colors[strategy])
-            ax.set_title(title)
-            ax.set_xlabel("Time (s)")
-            ax.set_ylabel("Completed Instances")
+                times_sorted = sorted(local_times[strategy])
+                completed = list(range(1, len(times_sorted) + 1))
+                local_counts[strategy] = completed
+                ax.plot(times_sorted, completed,
+                        color=strategy_colors[strategy],
+                        linestyle='-', linewidth=1.5)
+                ax.scatter(times_sorted, completed,
+                           label=strategy,
+                           edgecolor=strategy_colors[strategy],  # outer color
+                           facecolor='none',  # hollow marker
+                           marker=strategy_markers[strategy],
+                           s=80)
+
+            ax.set_title(title, fontsize=16)
+            ax.set_xlabel("Time (s)", fontsize=14)
+            ax.set_ylabel("Completed Instances", fontsize=14)
+            ax.tick_params(axis='both', labelsize=14)
             ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
             figs[f"time_vs_completed_{problem_name}_{obj}obj"] = fig
             plt.tight_layout()
@@ -2003,10 +2014,23 @@ class MoAnalysis:
         # Global plot for all objectives
         fig, ax = plt.subplots(figsize=(10, 6))
         for strategy in strategies:
-            ax.plot(time_points, overall_counts[strategy], label=strategy, color=strategy_colors[strategy])
-        ax.set_title(f"{problem_name} - All objectives")
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel("Completed Instances")
+            times_sorted = sorted(overall_times[strategy])
+            completed = list(range(1, len(times_sorted) + 1))
+            overall_counts[strategy] = completed
+            ax.plot(times_sorted, completed,
+                    color=strategy_colors[strategy],
+                    linestyle='-', linewidth=1.5)
+            ax.scatter(times_sorted, completed,
+                       label=strategy,
+                       edgecolor=strategy_colors[strategy],  # outer color
+                       facecolor='none',  # hollow marker
+                       marker=strategy_markers[strategy],
+                       s=80)
+
+        ax.set_title(f"{problem_name} - All objectives", fontsize=16)
+        ax.set_xlabel("Time (s)", fontsize=14)
+        ax.set_ylabel("Completed Instances", fontsize=14)
+        ax.tick_params(axis='both', labelsize=14)
         ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
         figs[f"time_vs_completed_{problem_name}_all"] = fig
         plt.tight_layout()
@@ -2047,49 +2071,23 @@ if __name__ == '__main__':
     figs_fronts = {}
 
     # todo for test copy code here for quick test
-    # sims_cost_clouds-------------------------------------------------------------
-    # csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_sims_cost_clouds_3200sec_solutions_and_stats.csv"
-
-    # sims_cost_resolution----------------------------------------------------------
-    # csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_sims_cost_res_7200_solutions_and_stats.csv"
-
-    # automotive--------------------------------------------------------------------
-    # csv_file_path = "../../campaign/aion/mo/choco-solver.org-v4.10.14/mo_automotive_7200_solutions_and_stats.csv"
-
-    #rcpsp saugmecon gavanelli
-    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/gavanelli-saugmecon-fixed/rcpsp_gavanelli_saugmecon_solutions_and_stats.csv"
-    df = pd.read_csv(csv_file_path)
-
-    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/ukp/gia_versions/gia_versions_objective_manager/mo_gia_versions_objective_manager_solutions_and_stats.csv"
-    df = analysis.csv_to_df(csv_file_path)
-
-    non_stats_headers = None  # they are inside the code
-    title_exhaustive = "Comparison strategies when all exhaustive"
-    title_non_exhaustive = "Comparison strategies when not all exhaustive"
-    # todo replace analysis.average_similar_nqueens_instances by the corresponding function for the problem
-    table_results = analysis.average_similar_ukp_moolibrary_voptlib_instances(df, non_stats_headers)
-    if table_results[0] is not None:
-        non_stats_headers = ["K", "n", "instances", "p"]
-        table_exhaustive_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_results[0],
-                                                                                     non_stats_headers, True,
-                                                                                     title_exhaustive)
-        print(table_exhaustive_latex)
-    if table_results[1] is not None:
-        non_stats_headers = ["K", "n", "instances"]
-        table_non_exhaustive_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_results[1],
-                                                                                         non_stats_headers, False,
-                                                                                         title_non_exhaustive)
-        print("---------------Comparison strategies when not all exhaustive----------------------")
-        print(table_non_exhaustive_latex)
-
-
-    metric = "hypervolume"
-    table_df_best = analysis.get_strategy_times_best_for_similar_instances_rcpsp(df_rcpsp, non_stats_headers, metric,
-                                                                                 maximize=True)
-    table_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_df_best, non_stats_headers)
-    print(table_latex)
-
-    non_stats_headers = ["K", "n", "instances", "p"]
-    table_df = analysis.average_similar_rcpsp_instances(df, non_stats_headers)
-    table_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_df, non_stats_headers)
-    print(table_latex)
+    # csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/nqueens/no_evolution_some_errors_saug/gia_variants/gia_versions_objective_manager/mo_gia_versions_objective_manager_solutions_and_stats.csv"
+    #
+    # problem = "nqueens"  # ukp, nqueens, rcpsp, sims_cost_clouds, automotive, flowshop_permutation
+    #
+    # df = analysis.csv_to_df(csv_file_path)
+    #
+    # # Get images time vs instances solved
+    # if problem == "ukp":
+    #     objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
+    # elif problem == "nqueens":
+    #     objs_elements, pattern_template = get_info_similar_instances_nqueens()
+    # elif problem == "rcpsp":
+    #     objs_elements, pattern_template = get_info_similar_instances_rcpsp()
+    # elif problem == "sims_cost_clouds":
+    #     # todo deal with sims correctly
+    #     objs_elements, pattern_template = get_info_similar_instances_sims()
+    #
+    # figs = {}
+    # figs = analysis.plot_time_vs_completed_instances_for_problem(df, problem, objs_elements, pattern_template, figs)
+    # chec= 1
