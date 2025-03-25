@@ -1,4 +1,5 @@
 import ast
+import math
 from collections import Counter
 
 import pandas as pd
@@ -1938,6 +1939,79 @@ class MoAnalysis:
         table = table.fillna(0)
         table = table.map(format_number)
         return table
+
+    #-------------------------------------------------------------------------------------------------------------------
+    #----------------- Time vs Instances solvede------------------------------------------------------------------------
+    #-------------------------------------------------------------------------------------------------------------------
+    def plot_time_vs_completed_instances_for_problem(self, df, problem_name, objs_elements, pattern_template, figs):
+        """
+        For a given problem, plots time vs number of completed instances (exhaustive = True)
+        only considering instances that appear across all strategies.
+        One plot per number of objectives and a global one for all objectives.
+        """
+
+        # df_problem = df[df[self.problem] == problem_name]
+        df_problem = df
+        strategies = df_problem[self.front_strategy].unique()
+        strategy_colors = dict(zip(strategies, sns.color_palette("husl", len(strategies))))
+        number_of_points = math.ceil(df_problem[self.time].max())
+        time_points = np.linspace(0, df_problem[self.time].max(), number_of_points)
+
+        overall_counts = {strategy: np.zeros(len(time_points)) for strategy in strategies}
+
+        for obj, elements_list in objs_elements.items():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            title = f"{problem_name} - {obj} objectives"
+
+            local_counts = {strategy: np.zeros(len(time_points)) for strategy in strategies}
+
+            for elements in elements_list:
+                pattern = pattern_template.format(obj=obj, elements=elements)
+                matched_df = df_problem[df_problem[self.instance].str.contains(pattern, regex=True)]
+
+                # Find instance names common to all strategies
+                instance_counts = matched_df.groupby(self.instance)[self.front_strategy].nunique()
+                common_instances = instance_counts[instance_counts == len(strategies)].index
+
+                for inst in common_instances:
+                    inst_df = matched_df[matched_df[self.instance] == inst]
+                    for strategy in strategies:
+                        strat_row = inst_df[inst_df[self.front_strategy] == strategy]
+                        if strat_row.empty:
+                            continue
+                        row = strat_row.iloc[0]
+                        if not row[self.exhaustive]:
+                            continue
+                        resolution_time = min(row[self.time], row[self.timeout])
+                        for i, t in enumerate(time_points):
+                            if resolution_time <= t:
+                                local_counts[strategy][i:] += 1
+                                overall_counts[strategy][i:] += 1
+                                break
+
+            # Plot for current objective
+            for strategy in strategies:
+                ax.plot(time_points, local_counts[strategy], label=strategy, color=strategy_colors[strategy])
+            ax.set_title(title)
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Completed Instances")
+            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+            figs[f"time_vs_completed_{problem_name}_{obj}obj"] = fig
+            plt.tight_layout()
+            plt.show()
+
+        # Global plot for all objectives
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for strategy in strategies:
+            ax.plot(time_points, overall_counts[strategy], label=strategy, color=strategy_colors[strategy])
+        ax.set_title(f"{problem_name} - All objectives")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Completed Instances")
+        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+        figs[f"time_vs_completed_{problem_name}_all"] = fig
+        plt.tight_layout()
+        plt.show()
+        return figs
 
 
 class Cols:
