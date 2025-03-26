@@ -42,28 +42,28 @@ def format_number(x):
         return int(x) if x == int(x) else f"{x:.2f}"
     return x  # Keep non-numeric values unchanged
 
-
-stats = ["time(s)", "sum_solutions_resolution_time(s)", "sum_solutions_nodes",
-         "sum_solutions_backtracks", "sum_solutions_fails",
-         "sum_number_solutions"]
-stats_pretty_name = ["time(s)", "resolution_time(s)", "nodes",
-                     "backtracks", "fails",
-                     "number_solutions"]
-
-stats = ["time(s)", "sum_solutions_nodes",
-         "sum_solutions_backtracks"]
-stats_pretty_name = ["time(s)", "nodes",
-                     "backtracks"]
-
-stats = ["time(s)", "sum_solutions_nodes", "front_cardinality"]
-stats_pretty_name = ["time(s)", "nodes"]
-
-stats_non_exhaustive = ["hypervolume", "front_cardinality", "exhaustive"]
-stats_non_exhaustive_pretty_name = ["Hyp", "Points", "Compl"]
+#
+# stats = ["time(s)", "sum_solutions_resolution_time(s)", "sum_solutions_nodes",
+#          "sum_solutions_backtracks", "sum_solutions_fails",
+#          "sum_number_solutions"]
+# stats_exhaustive_pretty_name = ["time(s)", "resolution_time(s)", "nodes",
+#                      "backtracks", "fails",
+#                      "number_solutions"]
+#
+# stats = ["time(s)", "sum_solutions_nodes",
+#          "sum_solutions_backtracks"]
+# stats_exhaustive_pretty_name = ["time(s)", "nodes",
+#                      "backtracks"]
+#
+# stats = ["time(s)", "sum_solutions_nodes", "front_cardinality"]
+# stats_exhaustive_pretty_name = ["time(s)", "nodes"]
+#
+# stats_non_exhaustive = ["hypervolume", "front_cardinality", "exhaustive"]
+# stats_non_exhaustive_pretty_name = ["Hyp", "Points", "Compl"]
 
 
 def get_info_similar_instances_ukp_moolibrary():
-    objs_elements = {3: [30, 40, 50], 4: [20, 30, 40], 5: [10, 20]}
+    objs_elements = {2: [50], 3: [30, 40, 50], 4: [20, 30, 40], 5: [10, 20]}
     pattern_template = "KP_p-{obj}_n-{elements}_ins-"
     return objs_elements, pattern_template
 
@@ -113,6 +113,12 @@ class MoAnalysis:
         self.pareto_front = pareto_front
         self.time = time
         self.timeout = "timeout"
+        # for table stats
+        self.stats_exhaustive = ["time(s)", "sum_solutions_nodes", "front_cardinality"]
+        self.stats_exhaustive_pretty_name = ["time(s)", "nodes"]
+
+        self.stats_non_exhaustive = ["hypervolume", "front_cardinality", "exhaustive"]
+        self.stats_non_exhaustive_pretty_name = ["Hyp", "Points", "Compl"]
 
         if time_solver_sec is None:
             self.time_solver_sec = time
@@ -1741,11 +1747,11 @@ class MoAnalysis:
             return None
 
         if is_exhaustive:
-            stats_depending_exhaustive = stats.copy()
-            stats_pretty_name_depending_exhaustive = stats_pretty_name
+            stats_depending_exhaustive = self.stats_exhaustive.copy()
+            stats_pretty_name_depending_exhaustive = self.stats_exhaustive_pretty_name
         else:
-            stats_depending_exhaustive = stats_non_exhaustive
-            stats_pretty_name_depending_exhaustive = stats_non_exhaustive_pretty_name
+            stats_depending_exhaustive = self.stats_non_exhaustive
+            stats_pretty_name_depending_exhaustive = self.stats_non_exhaustive_pretty_name
 
         agg_dict = {col: "mean" for col in stats_depending_exhaustive}
         if not is_exhaustive:
@@ -1813,8 +1819,9 @@ class MoAnalysis:
         df_exhaustive = self.average_similar_instances(exhaustive_df, objs_elements, pattern_template, non_stats_headers,
                                                        is_exhaustive=True)
         if df_exhaustive is not None:
-            data_exhaustive = self.create_data_frame_pretty_table_like_disjunctive_paper(df_exhaustive, stats_pretty_name,
-                                                                       non_stats_headers)
+            data_exhaustive = self.create_data_frame_pretty_table_like_disjunctive_paper(df_exhaustive,
+                                                                                         self.stats_exhaustive_pretty_name,
+                                                                                         non_stats_headers)
             data_to_return[0] = data_exhaustive
         else:
             print("No exhaustive instances found.")
@@ -1826,8 +1833,8 @@ class MoAnalysis:
 
         if df_non_exhaustive is not None:
             data_non_exhaustive = self.create_data_frame_pretty_table_like_disjunctive_paper(df_non_exhaustive,
-                                                                       stats_non_exhaustive_pretty_name,
-                                                                       non_exhaustive_headers)
+                                                                                             self.stats_non_exhaustive_pretty_name,
+                                                                                             non_exhaustive_headers)
             data_to_return[1] = data_non_exhaustive
         else:
             print("No non-exhaustive instances found.")
@@ -1906,13 +1913,13 @@ class MoAnalysis:
                 # add the group to the non exhaustive df
                 non_exhaustive_groups.append(group)
         keep_cols = [self.instance, self.front_strategy]
-        keep_cols.extend(stats)
+        keep_cols.extend(self.stats_exhaustive)
 
         exhaustive_df = pd.concat(exhaustive_groups, ignore_index=True)[keep_cols] if exhaustive_groups \
             else pd.DataFrame(columns=df.columns)
         # todo how to show the non exhaustive instances
         keep_cols = [self.instance, self.front_strategy]
-        keep_cols.extend(stats_non_exhaustive)
+        keep_cols.extend(self.stats_non_exhaustive)
         non_exhaustive_df = pd.concat(non_exhaustive_groups, ignore_index=True)[keep_cols] if non_exhaustive_groups \
             else pd.DataFrame(columns=df.columns)
         return exhaustive_df, non_exhaustive_df
@@ -1961,7 +1968,7 @@ class MoAnalysis:
 
         for obj, elements_list in objs_elements.items():
             fig, ax = plt.subplots(figsize=(10, 6))
-            title = f"{problem_name} - {obj} objectives"
+            title = f"{problem_name} - Instances with {obj} objectives"
 
             local_times = {strategy: [] for strategy in strategies}
             local_counts = {strategy: [] for strategy in strategies}
@@ -2027,7 +2034,7 @@ class MoAnalysis:
                        marker=strategy_markers[strategy],
                        s=80)
 
-        ax.set_title(f"{problem_name} - All objectives", fontsize=16)
+        ax.set_title(f"{problem_name} - All instances", fontsize=16)
         ax.set_xlabel("Time (s)", fontsize=14)
         ax.set_ylabel("Completed Instances", fontsize=14)
         ax.tick_params(axis='both', labelsize=14)
@@ -2036,6 +2043,14 @@ class MoAnalysis:
         plt.tight_layout()
         plt.show()
         return figs
+
+    def set_stats_exhaustive(self, stats_exhaustive, pretty_name):
+        self.stats_exhaustive = stats_exhaustive
+        self.stats_exhaustive_pretty_name = pretty_name
+
+    def set_stats_non_exhaustive(self, stats_non_exhaustive, pretty_name):
+        self.stats_non_exhaustive = stats_non_exhaustive
+        self.stats_non_exhaustive_pretty_name = pretty_name
 
 
 class Cols:
