@@ -1,5 +1,4 @@
 import ast
-import math
 from collections import Counter
 
 import pandas as pd
@@ -10,6 +9,8 @@ from matplotlib.lines import Line2D
 from IPython.display import display
 import os
 from scipy.stats import ttest_rel, wilcoxon
+from pymoo.indicators.hv import Hypervolume
+from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 
 
 def find_closest_time_index_to_time_t(x_all_times, id_times, t):
@@ -25,7 +26,6 @@ def is_dominated(point, other_point, maximize=True):
             return False
         elif not maximize and point[dimension] < other_point[dimension]:
             return False
-    print(f"Point {point} is dominated by {other_point}")
     return True
 
 
@@ -92,6 +92,61 @@ def get_info_similar_instances_sims():
     return objs_elements, pattern_template
 
 
+def filter_initial_k_points(front, k, maximize=True):
+    """
+    Removes initial k points if any of them are dominated or duplicated later.
+    """
+    if len(front) <= k:
+        return front
+
+    for i in range(k-1, -1, -1):
+        suspicious_pt = front[i]
+        for j in range(k, len(front)):
+            if is_dominated(suspicious_pt, front[j], maximize):
+                del front[i]
+                break
+
+    return front
+
+
+def compute_hv(front, reference_point, double_check_non_dominance=True):
+    front = np.array(front)
+    if front.size == 0:
+        return 0.0
+
+    if is_maximization_problem(front, reference_point):
+        # convert maximization to minimization to calculate the Hypervolume using the pymoo library
+        reference_point = -reference_point
+        front = -front
+
+    # Filter non-dominated only (safe redundancy)
+    if double_check_non_dominance:
+        idx = NonDominatedSorting().do(front, only_non_dominated_front=True)
+        front = front[idx]
+
+    return Hypervolume(ref_point=reference_point)(front)
+
+
+def is_maximization_problem(front, reference_point):
+    # check if the front is np array
+    if not isinstance(front, np.ndarray):
+        front_np = np.array(front)
+    else:
+        front_np = front
+
+    if not isinstance(reference_point, np.ndarray):
+        reference_point_np = np.array(reference_point)
+    else:
+        reference_point_np = reference_point
+
+    if len(front) > 1:
+        comparisson_array = reference_point_np < front_np[1]
+    else:
+        comparisson_array = reference_point_np < front_np[0]
+
+    return comparisson_array[0]
+
+
 class MoAnalysis:
 
     def __init__(self, benchmark='benchmark', problem='problem', instance='instance', solver_name='solver',
@@ -141,7 +196,7 @@ class MoAnalysis:
     @staticmethod
     def count_common_digits(values):
         """Finds how many leading digits are the same in all values (excluding exponent)."""
-        values = sorted(abs(v) for v in values if v >= 10**4)  # Ignore small numbers
+        values = sorted(abs(v) for v in values if v >= 10 ** 4)  # Ignore small numbers
         if len(values) < 2:
             return 0  # No comparison possible with one or no values
 
@@ -163,7 +218,7 @@ class MoAnalysis:
         if num is None or np.isnan(num):
             return ""
 
-        if num < 10**4:  # Keep normal formatting for small numbers
+        if num < 10 ** 4:  # Keep normal formatting for small numbers
             return format_number(num)
 
         exponent = int(np.floor(np.log10(abs(num))))  # Get exponent
@@ -213,7 +268,8 @@ class MoAnalysis:
                 )
                 # Apply bold if this value is the lowest for its stat
                 stat_name = col[1]
-                if stat_name not in ["NaN", "nan", None] and num_value == values_per_stat_to_highlight.get(stat_name, None):
+                if stat_name not in ["NaN", "nan", None] and num_value == values_per_stat_to_highlight.get(stat_name,
+                                                                                                           None):
                     formatted_value = f"$\\mathbf{{{formatted_value.strip('$')}}}$" if col[0] != "" else formatted_value
                 else:
                     formatted_value = f"{formatted_value}"
@@ -224,7 +280,8 @@ class MoAnalysis:
         return " & ".join(map(str, formatted_row)) + " \\\\"
 
     @staticmethod
-    def disjunctive_paper_style_dataframe_to_latex(table, header_columns_list, minimize=True, title="Comparison of Strategies"):
+    def disjunctive_paper_style_dataframe_to_latex(table, header_columns_list, minimize=True,
+                                                   title="Comparison of Strategies"):
         """Convert a DataFrame to a formatted LaTeX table."""
         # Apply formatting row by row
         latex_rows = table.apply(
@@ -607,7 +664,7 @@ class MoAnalysis:
             objs_elements = objs_list[i]
             pattern_template = pattern_list[i]
             table = self.get_strategy_times_best_for_similar_instances(objs_elements, pattern_template, df,
-                                                               metric, maximize, non_stats_headers=None)
+                                                                       metric, maximize, non_stats_headers=None)
             table_list.append(table)
         # Concatenate all results into a single DataFrame
         if len(table_list) == 0:
@@ -644,10 +701,11 @@ class MoAnalysis:
                 # Filter instances based on the pattern
                 df_similar_instances = df[df[self.instance].str.contains(pattern, regex=True)]
                 if not df_similar_instances.empty:
-                    best_count, absolute_best_count, shared_best_count = self.get_best_strategies_absolute_shared(df_similar_instances,
-                                                                                                                  metric,
-                                                                                                                  maximize,
-                                                                                                                  False)
+                    best_count, absolute_best_count, shared_best_count = self.get_best_strategies_absolute_shared(
+                        df_similar_instances,
+                        metric,
+                        maximize,
+                        False)
                     # For each strategy, count the number of times exhaustive is true in the similar instances
                     # Count total instances per strategy
                     # total_similar_instances = df_similar_instances.groupby(self.front_strategy).size()
@@ -659,7 +717,8 @@ class MoAnalysis:
                     # }).reset_index(drop=True)
 
                     df_best = pd.DataFrame({
-                        self.front_strategy: list(best_count.keys()),  # Front strategy or solver + front based on grouping
+                        self.front_strategy: list(best_count.keys()),
+                        # Front strategy or solver + front based on grouping
                         'Times best': list(best_count.values()),
                     })
                     # Merge `df_best` with `total_exhaustive` on `self.front_strategy`
@@ -1301,6 +1360,7 @@ class MoAnalysis:
         for i, point in enumerate(front):
             for j, other_point_in_front in enumerate(front):
                 if i != j and is_dominated(point, other_point_in_front, maximize):
+                    print(f"Point {point} is dominated by {other_point_in_front}")
                     dominated_points.append(point)
                     break
         return dominated_points
@@ -1786,7 +1846,8 @@ class MoAnalysis:
         for obj, list_elements in objs_elements.items():
             for elements in list_elements:
                 pattern = pattern_template.format(obj=obj, elements=elements)
-                df_result = self.process_similar_instances_for_average(df, obj, elements, pattern, non_stats_headers, is_exhaustive)
+                df_result = self.process_similar_instances_for_average(df, obj, elements, pattern, non_stats_headers,
+                                                                       is_exhaustive)
                 if df_result is not None:
                     avg_table_rows.append(df_result)
 
@@ -1795,7 +1856,8 @@ class MoAnalysis:
 
         return pd.concat(avg_table_rows, ignore_index=True)
 
-    def average_similar_instances_exhaustive_nonexhaustive(self, df, objs_elements, pattern_template, non_stats_headers=None):
+    def average_similar_instances_exhaustive_nonexhaustive(self, df, objs_elements, pattern_template,
+                                                           non_stats_headers=None):
         """
         Computes the average statistics for both exhaustive and non-exhaustive instances.
 
@@ -1816,7 +1878,8 @@ class MoAnalysis:
         data_to_return = [None, None]
         # Process exhaustive instances
         non_stats_headers = ["K", "n", "instances", "p"]
-        df_exhaustive = self.average_similar_instances(exhaustive_df, objs_elements, pattern_template, non_stats_headers,
+        df_exhaustive = self.average_similar_instances(exhaustive_df, objs_elements, pattern_template,
+                                                       non_stats_headers,
                                                        is_exhaustive=True)
         if df_exhaustive is not None:
             data_exhaustive = self.create_data_frame_pretty_table_like_disjunctive_paper(df_exhaustive,
@@ -1843,7 +1906,8 @@ class MoAnalysis:
 
     def average_similar_ukp_moolibrary_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
-        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
+        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template,
+                                                                       non_stats_headers)
 
     def average_similar_ukp_moolibrary_voptlib_instances(self, df, non_stats_headers=None):
         objs_list = []
@@ -1859,7 +1923,8 @@ class MoAnalysis:
         for i in range(len(objs_list)):
             objs_elements = objs_list[i]
             pattern_template = pattern_list[i]
-            table = self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
+            table = self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template,
+                                                                            non_stats_headers)
             # table is a list with 2 dataframes, one for exhaustive and one for non-exhaustive
             if table[0] is not None:
                 table_list_exhaustive.append(table[0])
@@ -1882,19 +1947,23 @@ class MoAnalysis:
 
     def average_similar_bi_ukp_voptlib_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_bi_ukp_voptlib()
-        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
+        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template,
+                                                                       non_stats_headers)
 
     def average_similar_nqueens_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_nqueens()
-        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
+        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template,
+                                                                       non_stats_headers)
 
     def average_similar_rcpsp_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_rcpsp()
-        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
+        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template,
+                                                                       non_stats_headers)
 
     def average_similar_sims_instances(self, df, non_stats_headers=None):
         objs_elements, pattern_template = get_info_similar_instances_sims()
-        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template, non_stats_headers)
+        return self.average_similar_instances_exhaustive_nonexhaustive(df, objs_elements, pattern_template,
+                                                                       non_stats_headers)
 
     def get_all_exhaustive_and_all_non_exhaustive_instances_df_only_stats(self, df):
         # gruop by instance
@@ -1947,9 +2016,9 @@ class MoAnalysis:
         table = table.map(format_number)
         return table
 
-    #-------------------------------------------------------------------------------------------------------------------
-    #----------------- Time vs Instances solvede------------------------------------------------------------------------
-    #-------------------------------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------------------------------------------------
+    # ----------------- Time vs Instances solvede------------------------------------------------------------------------
+    # -------------------------------------------------------------------------------------------------------------------
     def plot_time_vs_completed_instances_for_problem(self, df, problem_name, objs_elements, pattern_template, figs):
         """
         For a given problem, plots time vs number of completed instances (exhaustive = True)
@@ -2043,6 +2112,168 @@ class MoAnalysis:
         plt.tight_layout()
         plt.show()
         return figs
+
+    # -------------------------------------------------------------------------------------------------------------------
+    # ----------------- Hypervolume vs Time-------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------------------------------------------------
+    def plot_normalized_hypervolume_evolution(self, df, problem_name, objs_elements, pattern_template, figs,
+                                              plot_variance=True):
+        """
+        Plot normalized Time vs Hypervolume evolution with (optional) variance,
+        grouped by strategy, for each number of objectives and a global plot.
+        """
+
+        from scipy.interpolate import interp1d
+
+        # df_problem = df[df[self.problem] == problem_name]
+        df_problem = df
+        strategies = df_problem[self.front_strategy].unique()
+        strategy_colors = dict(zip(strategies, sns.color_palette("colorblind", len(strategies))))
+        strategy_markers = dict(zip(strategies, ['o', 's', '^', 'D', 'X', '*']))
+
+        global_data = {strategy: [[] for _ in range(100)] for strategy in strategies}
+        normalized_time = np.linspace(0, 1, 100)
+
+        for obj, elements_list in objs_elements.items():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            title = f"{problem_name} - Instances with {obj} objectives"
+            objective_data = {strategy: [[] for _ in range(100)] for strategy in strategies}
+
+            for elements in elements_list:
+                pattern = pattern_template.format(obj=obj, elements=elements)
+                matched_df = df_problem[df_problem[self.instance].str.contains(pattern, regex=True)]
+
+                # Keep only instances solved by all strategies
+                instance_counts = matched_df.groupby(self.instance)[self.front_strategy].nunique()
+                common_instances = instance_counts[instance_counts == len(strategies)].index
+
+                for inst in common_instances:
+                    inst_df = matched_df[matched_df[self.instance] == inst]
+
+                    max_time = inst_df[self.time].max()
+                    max_hv = 0
+                    temp_store = []
+                    for strategy in strategies:
+                        row = inst_df[inst_df[self.front_strategy] == strategy]
+                        if row.empty:
+                            continue
+
+                        row = row.iloc[0]
+                        if "hv_computed_evolution" in df_problem.columns:
+                            hv_data = ast.literal_eval(row["hv_computed_evolution"])
+                            times = [t for t, _ in hv_data]
+                            hypervolumes = [hv for _, hv in hv_data]
+                        else:
+                            times, hypervolumes = self.compute_hypervolume_vs_time_from_fronts(row)
+
+                        if hypervolumes[-1] != row[self.hypervolume]:
+                            raise Exception(f"Hypervolume mismatch for instance {inst} and strategy {strategy}")
+
+                        if len(times) == 0 or len(hypervolumes) == 0:
+                            continue
+
+                        max_hv = max(max_hv, hypervolumes[-1])
+                        temp_store.append((strategy, times, hypervolumes))
+
+                    for strategy, times, hypervolumes in temp_store:
+                        times_norm = np.array(times) / max_time
+                        hypervolumes_norm = np.array(hypervolumes) / max_hv
+                        f_interp = interp1d(times_norm, hypervolumes_norm, kind='previous', bounds_error=False,
+                                            fill_value=(0.0, hypervolumes_norm[-1]))
+                        for i, t_norm in enumerate(normalized_time):
+                            hv = f_interp(t_norm)
+                            objective_data[strategy][i].append(hv)
+                            global_data[strategy][i].append(hv)
+
+            # Plot per objective
+            for strategy in strategies:
+                means = [np.mean(vals) if vals else 0 for vals in objective_data[strategy]]
+                stds = [np.std(vals) if vals else 0 for vals in objective_data[strategy]]
+
+                ax.plot(normalized_time, means, label=strategy,
+                        color=strategy_colors[strategy],
+                        marker=strategy_markers[strategy],
+                        markersize=6, linestyle='-', linewidth=1.5,
+                        markerfacecolor='none')
+
+                if plot_variance:
+                    ax.fill_between(normalized_time,
+                                    np.array(means) - np.array(stds),
+                                    np.array(means) + np.array(stds),
+                                    alpha=0.2, color=strategy_colors[strategy])
+
+            ax.set_title(title, fontsize=16)
+            ax.set_xlabel("Normalized Time", fontsize=14)
+            ax.set_ylabel("Normalized Hypervolume", fontsize=14)
+            ax.tick_params(axis='both', labelsize=13)
+            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.tight_layout()
+            figs[f"normalized_hv_vs_time_{problem_name}_{obj}obj"] = fig
+            plt.show()
+
+        # Global Plot (all objectives)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for strategy in strategies:
+            means = [np.mean(vals) if vals else 0 for vals in global_data[strategy]]
+            stds = [np.std(vals) if vals else 0 for vals in global_data[strategy]]
+
+            ax.plot(normalized_time, means, label=strategy,
+                    color=strategy_colors[strategy],
+                    marker=strategy_markers[strategy],
+                    markersize=6, linestyle='-', linewidth=1.5,
+                    markerfacecolor='none')
+
+            if plot_variance:
+                ax.fill_between(normalized_time,
+                                np.array(means) - np.array(stds),
+                                np.array(means) + np.array(stds),
+                                alpha=0.2, color=strategy_colors[strategy])
+
+        ax.set_title(f"{problem_name} - All instances", fontsize=16)
+        ax.set_xlabel("Normalized Time", fontsize=14)
+        ax.set_ylabel("Normalized Hypervolume", fontsize=14)
+        ax.tick_params(axis='both', labelsize=13)
+        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        figs[f"normalized_hv_vs_time_{problem_name}_all"] = fig
+        plt.show()
+        return figs
+
+    def compute_hypervolume_vs_time_from_fronts(self, row):
+        try:
+            data = ast.literal_eval(row[self.hypervolume_evolution])
+        except Exception:
+            return [], []
+
+        if not isinstance(data, list) or len(data) == 0:
+            return [], []
+
+        ref_point = row["reference_point"]
+        ref_point = ast.literal_eval(ref_point)
+        num_objectives = len(ref_point)
+        times = []
+        hypervolumes = []
+        # convert from string to np array
+        pareto_front = row[self.pareto_front] # is a string
+        pareto_front = ast.literal_eval(pareto_front)
+
+        maximize = is_maximization_problem(pareto_front, ref_point)
+
+        for t, front in data:
+            if not front:
+                continue
+            if front[0][0] < 0:
+                # front elements cannot be negative, convert to positive
+                front = np.abs(front)
+            if "saugmecon" in row[self.front_strategy].lower() or "disjunctive" in row[self.front_strategy].lower():
+                filtered_front = filter_initial_k_points(front, num_objectives, maximize)
+            else:
+                filtered_front = front
+            hv = compute_hv(filtered_front, reference_point=ref_point, double_check_non_dominance=False)
+            times.append(t)
+            hypervolumes.append(hv)
+
+        return times, hypervolumes
 
     def set_stats_exhaustive(self, stats_exhaustive, pretty_name):
         self.stats_exhaustive = stats_exhaustive
