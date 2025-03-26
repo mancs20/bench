@@ -117,9 +117,38 @@ def process_json_file(input_json_file_path, output_stats_filename):
             # verify if the last point in the pareto front is non-dominated by the front. If the timeout is reached the
             # algorithms will return the approximate solution as the last point in the front, which is not necessarily
             # non-dominated.
-            pareto_front = get_true_non_dominated_front(np.array(current_json_mo_solution_details.get('pareto_front')),
+            hypervolume_evolution = None
+            if len(np.array(current_json_mo_solution_details.get('pareto_front'))) != 0:
+                pareto_front = get_true_non_dominated_front(np.array(current_json_mo_solution_details.get('pareto_front')),
                                                         current_json_mo_solution_details.get('exhaustive'),
                                                         reference_point)
+            else:
+                # check if there is a pareto front, if not get the last entrance in hypervolume evolution
+                hypervolume_evolution = calculate_hypervolume_evolution(lines, reference_point) # We're
+                # interested in the front not in the hypervolume evolution, so with
+                # hv_data = extract_hypervolume_lines(lines) and read the last element should be enough
+                pareto_front = np.array(hypervolume_evolution[-1][1])
+                if len(pareto_front) > 1:
+                    # check if the first number objectives points are not dominated by the rest of the front
+                    maximization = is_maximization_problem(pareto_front, reference_point)
+                    number_objectives = len(reference_point)
+                    dominated_initial_points = [False] * number_objectives
+                    for index, point in enumerate(pareto_front):
+                        if index >= number_objectives:
+                            for i in range(number_objectives):
+                                test_point = pareto_front[i]
+                                if not dominated_initial_points[i] and dominates(point, test_point, maximization):
+                                    dominated_initial_points[i] = True
+                                    break
+                    # remove the dominated points from the front
+                    filtered_front = []
+                    for i in range(number_objectives):
+                        if not dominated_initial_points[i]:
+                            filtered_front.append(pareto_front[i])
+                    # Add the remaining points after the initial ones
+                    filtered_front.extend(pareto_front[number_objectives:])
+                    pareto_front = np.array(filtered_front)
+
             if len(pareto_front) != len(current_json_mo_solution_details.get('pareto_front')):
                 # pareto_front to string to avoid numpy array serialization issues
                 current_json_mo_solution_details['pareto_front'] = pareto_front.tolist()
@@ -135,7 +164,8 @@ def process_json_file(input_json_file_path, output_stats_filename):
             if calculate_evolution and (calculate_evolution_for_gavanelli or filtered_data['front_generator'] !=
                                         'ParetoGavanelliGlobalConstraint'):
                 # calculate hypervolume evolution
-                hypervolume_evolution = calculate_hypervolume_evolution(lines, reference_point)
+                if hypervolume_evolution is None:
+                    hypervolume_evolution = calculate_hypervolume_evolution(lines, reference_point)
                 # hypervolume_evolution = [0.0] * len(solutions)
                 # temp_front = []
                 # for index, point in enumerate(solutions):
