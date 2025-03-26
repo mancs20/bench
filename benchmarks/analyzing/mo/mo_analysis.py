@@ -96,17 +96,20 @@ def filter_initial_k_points(front, k, maximize=True):
     """
     Removes initial k points if any of them are dominated or duplicated later.
     """
+    front = np.array(front)
+    to_keep = np.ones(len(front), dtype=bool)
+
     if len(front) <= k:
         return front
 
-    for i in range(k-1, -1, -1):
+    for i in range(k):
         suspicious_pt = front[i]
         for j in range(k, len(front)):
             if is_dominated(suspicious_pt, front[j], maximize):
-                del front[i]
+                to_keep[i] = False
                 break
 
-    return front
+    return front[to_keep]
 
 
 def compute_hv(front, reference_point, double_check_non_dominance=True):
@@ -2117,39 +2120,155 @@ class MoAnalysis:
     # ----------------- Hypervolume vs Time-------------------------------------------------------------------------------
     # -------------------------------------------------------------------------------------------------------------------
     def plot_normalized_hypervolume_evolution(self, df, problem_name, objs_elements, pattern_template, figs,
-                                              plot_variance=True):
+                                              plot_variance=False):
         """
-        Plot normalized Time vs Hypervolume evolution with (optional) variance,
-        grouped by strategy, for each number of objectives and a global plot.
+        Plots normalized hypervolume evolution over time using precomputed data from get_normalized_hv_evolution_data.
         """
+        data = self.get_normalized_hv_evolution_data(df, problem_name, objs_elements, pattern_template, plot_variance)
 
-        from scipy.interpolate import interp1d
-
-        # df_problem = df[df[self.problem] == problem_name]
-        df_problem = df
-        strategies = df_problem[self.front_strategy].unique()
+        normalized_time = data["normalized_time"]
+        strategies = list(data["global"].keys())
         strategy_colors = dict(zip(strategies, sns.color_palette("colorblind", len(strategies))))
         strategy_markers = dict(zip(strategies, ['o', 's', '^', 'D', 'X', '*']))
 
-        global_data = {strategy: [[] for _ in range(100)] for strategy in strategies}
+        plot_styles = ["lines", "markers"]
+
+        for style in plot_styles:
+            for obj, obj_data in data["objectives"].items():
+                fig, ax = plt.subplots(figsize=(10, 6))
+                title = f"{problem_name} - Instances with {obj} objectives"
+
+                for strategy in strategies:
+                    means = obj_data[strategy]["mean"]
+                    stds = obj_data[strategy]["std"]
+
+                    if style == "lines":
+                        ax.plot(
+                            normalized_time, means,
+                            label=strategy,
+                            color=strategy_colors[strategy],
+                            linestyle='-', linewidth=3,
+                            markerfacecolor='none'
+                        )
+
+                        if plot_variance and stds is not None:
+                            ax.fill_between(
+                                normalized_time,
+                                np.array(means) - np.array(stds),
+                                np.array(means) + np.array(stds),
+                                alpha=0.2,
+                                color=strategy_colors[strategy]
+                            )
+
+                    elif style == "markers":
+                        ax.plot(
+                            normalized_time, means,
+                            label=strategy,
+                            color=strategy_colors[strategy],
+                            marker=strategy_markers[strategy],
+                            linestyle='None',
+                            markersize=4,
+                            markerfacecolor='none'
+                        )
+
+                        if plot_variance and stds is not None:
+                            ax.errorbar(
+                                normalized_time,
+                                means,
+                                yerr=stds,
+                                fmt=strategy_markers[strategy],
+                                color=strategy_colors[strategy],
+                                markersize=3,
+                                capsize=2,
+                                linestyle='None'
+                            )
+
+                ax.set_title(title, fontsize=16)
+                ax.set_xlabel("Normalized Time", fontsize=14)
+                ax.set_ylabel("Normalized Hypervolume", fontsize=14)
+                ax.tick_params(axis='both', labelsize=13)
+                ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+                plt.tight_layout()
+                figs[f"normalized_hv_vs_time_{problem_name}_{obj}obj_{style}"] = fig
+                plt.show()
+
+            # Global Plot
+            fig, ax = plt.subplots(figsize=(10, 6))
+            title = f"{problem_name} - All instances"
+
+            for strategy in strategies:
+                means = data["global"][strategy]["mean"]
+                stds = data["global"][strategy]["std"]
+
+                if style == "lines":
+                    ax.plot(
+                        normalized_time, means,
+                        label=strategy,
+                        color=strategy_colors[strategy],
+                        linestyle='-', linewidth=3,
+                        markerfacecolor='none'
+                    )
+                    if plot_variance and stds is not None:
+                        ax.fill_between(
+                            normalized_time,
+                            np.array(means) - np.array(stds),
+                            np.array(means) + np.array(stds),
+                            alpha=0.2,
+                            color=strategy_colors[strategy]
+                        )
+                elif style == "markers":
+                    ax.plot(
+                        normalized_time, means,
+                        label=strategy,
+                        color=strategy_colors[strategy],
+                        marker=strategy_markers[strategy],
+                        linestyle='None',
+                        markersize=4,
+                        markerfacecolor='none'
+                    )
+                    if plot_variance and stds is not None:
+                        ax.errorbar(
+                            normalized_time,
+                            means,
+                            yerr=stds,
+                            fmt=strategy_markers[strategy],
+                            color=strategy_colors[strategy],
+                            markersize=3,
+                            capsize=2,
+                            linestyle='None'
+                        )
+
+            ax.set_title(title, fontsize=16)
+            ax.set_xlabel("Normalized Time", fontsize=14)
+            ax.set_ylabel("Normalized Hypervolume", fontsize=14)
+            ax.tick_params(axis='both', labelsize=13)
+            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.tight_layout()
+            figs[f"normalized_hv_vs_time_{problem_name}_all_{style}"] = fig
+            plt.show()
+        return figs
+
+    def get_normalized_hv_evolution_data(self, df, problem_name, objs_elements, pattern_template, plot_variance=True):
+        from scipy.interpolate import interp1d
+
+        df_problem = df
+        strategies = df_problem[self.front_strategy].unique()
         normalized_time = np.linspace(0, 1, 100)
 
+        all_data = {"normalized_time": normalized_time, "objectives": {},
+                    "global": {strategy: [[] for _ in range(100)] for strategy in strategies}}
+
         for obj, elements_list in objs_elements.items():
-            fig, ax = plt.subplots(figsize=(10, 6))
-            title = f"{problem_name} - Instances with {obj} objectives"
             objective_data = {strategy: [[] for _ in range(100)] for strategy in strategies}
 
             for elements in elements_list:
                 pattern = pattern_template.format(obj=obj, elements=elements)
                 matched_df = df_problem[df_problem[self.instance].str.contains(pattern, regex=True)]
-
-                # Keep only instances solved by all strategies
                 instance_counts = matched_df.groupby(self.instance)[self.front_strategy].nunique()
                 common_instances = instance_counts[instance_counts == len(strategies)].index
 
                 for inst in common_instances:
                     inst_df = matched_df[matched_df[self.instance] == inst]
-
                     max_time = inst_df[self.time].max()
                     max_hv = 0
                     temp_store = []
@@ -2157,7 +2276,6 @@ class MoAnalysis:
                         row = inst_df[inst_df[self.front_strategy] == strategy]
                         if row.empty:
                             continue
-
                         row = row.iloc[0]
                         if "hv_computed_evolution" in df_problem.columns:
                             hv_data = ast.literal_eval(row["hv_computed_evolution"])
@@ -2165,13 +2283,8 @@ class MoAnalysis:
                             hypervolumes = [hv for _, hv in hv_data]
                         else:
                             times, hypervolumes = self.compute_hypervolume_vs_time_from_fronts(row)
-
-                        if hypervolumes[-1] != row[self.hypervolume]:
-                            raise Exception(f"Hypervolume mismatch for instance {inst} and strategy {strategy}")
-
                         if len(times) == 0 or len(hypervolumes) == 0:
                             continue
-
                         max_hv = max(max_hv, hypervolumes[-1])
                         temp_store.append((strategy, times, hypervolumes))
 
@@ -2183,61 +2296,27 @@ class MoAnalysis:
                         for i, t_norm in enumerate(normalized_time):
                             hv = f_interp(t_norm)
                             objective_data[strategy][i].append(hv)
-                            global_data[strategy][i].append(hv)
+                            all_data["global"][strategy][i].append(hv)
 
-            # Plot per objective
-            for strategy in strategies:
-                means = [np.mean(vals) if vals else 0 for vals in objective_data[strategy]]
-                stds = [np.std(vals) if vals else 0 for vals in objective_data[strategy]]
+            # Store data per objective
+            all_data["objectives"][obj] = {
+                strategy: {
+                    "mean": [np.mean(vals) if vals else 0 for vals in objective_data[strategy]],
+                    "std": [np.std(vals) if vals else 0 for vals in objective_data[strategy]] if plot_variance else None
+                }
+                for strategy in strategies
+            }
 
-                ax.plot(normalized_time, means, label=strategy,
-                        color=strategy_colors[strategy],
-                        marker=strategy_markers[strategy],
-                        markersize=6, linestyle='-', linewidth=1.5,
-                        markerfacecolor='none')
+        # Global stats
+        all_data["global"] = {
+            strategy: {
+                "mean": [np.mean(vals) if vals else 0 for vals in all_data["global"][strategy]],
+                "std": [np.std(vals) if vals else 0 for vals in all_data["global"][strategy]] if plot_variance else None
+            }
+            for strategy in strategies
+        }
 
-                if plot_variance:
-                    ax.fill_between(normalized_time,
-                                    np.array(means) - np.array(stds),
-                                    np.array(means) + np.array(stds),
-                                    alpha=0.2, color=strategy_colors[strategy])
-
-            ax.set_title(title, fontsize=16)
-            ax.set_xlabel("Normalized Time", fontsize=14)
-            ax.set_ylabel("Normalized Hypervolume", fontsize=14)
-            ax.tick_params(axis='both', labelsize=13)
-            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-            plt.tight_layout()
-            figs[f"normalized_hv_vs_time_{problem_name}_{obj}obj"] = fig
-            plt.show()
-
-        # Global Plot (all objectives)
-        fig, ax = plt.subplots(figsize=(10, 6))
-        for strategy in strategies:
-            means = [np.mean(vals) if vals else 0 for vals in global_data[strategy]]
-            stds = [np.std(vals) if vals else 0 for vals in global_data[strategy]]
-
-            ax.plot(normalized_time, means, label=strategy,
-                    color=strategy_colors[strategy],
-                    marker=strategy_markers[strategy],
-                    markersize=6, linestyle='-', linewidth=1.5,
-                    markerfacecolor='none')
-
-            if plot_variance:
-                ax.fill_between(normalized_time,
-                                np.array(means) - np.array(stds),
-                                np.array(means) + np.array(stds),
-                                alpha=0.2, color=strategy_colors[strategy])
-
-        ax.set_title(f"{problem_name} - All instances", fontsize=16)
-        ax.set_xlabel("Normalized Time", fontsize=14)
-        ax.set_ylabel("Normalized Hypervolume", fontsize=14)
-        ax.tick_params(axis='both', labelsize=13)
-        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
-        figs[f"normalized_hv_vs_time_{problem_name}_all"] = fig
-        plt.show()
-        return figs
+        return all_data
 
     def compute_hypervolume_vs_time_from_fronts(self, row):
         try:
@@ -2250,7 +2329,7 @@ class MoAnalysis:
 
         ref_point = row["reference_point"]
         ref_point = ast.literal_eval(ref_point)
-        num_objectives = len(ref_point)
+        num_possible_points_to_filter = len(ref_point)
         times = []
         hypervolumes = []
         # convert from string to np array
@@ -2259,17 +2338,35 @@ class MoAnalysis:
 
         maximize = is_maximization_problem(pareto_front, ref_point)
 
+        removed_indexes = set()
+
         for t, front in data:
             if not front:
                 continue
             if front[0][0] < 0:
                 # front elements cannot be negative, convert to positive
                 front = np.abs(front)
-            if "saugmecon" in row[self.front_strategy].lower() or "disjunctive" in row[self.front_strategy].lower():
-                filtered_front = filter_initial_k_points(front, num_objectives, maximize)
-            else:
-                filtered_front = front
-            hv = compute_hv(filtered_front, reference_point=ref_point, double_check_non_dominance=False)
+            front = np.array(front)
+            # reduce the number of points to filter if there have been determined some points to filter in previous
+            # iterations
+            if (("saugmecon" in row[self.front_strategy].lower() or "disjunctive" in row[self.front_strategy].lower())
+                    and num_possible_points_to_filter > 0):
+
+                # Check new ones only if we haven't removed k yet
+                if len(removed_indexes) < num_possible_points_to_filter:
+                    for i in range(num_possible_points_to_filter):
+                        if i in removed_indexes:
+                            continue
+                        for j in range(num_possible_points_to_filter, len(front)):
+                            if is_dominated(front[i], front[j], maximize):
+                                removed_indexes.add(i)
+                                break
+
+                    # After checking, remove again
+                    if removed_indexes:
+                        front = np.delete(front, list(removed_indexes), axis=0)
+
+            hv = compute_hv(front, reference_point=ref_point, double_check_non_dominance=False)
             times.append(t)
             hypervolumes.append(hv)
 
@@ -2317,23 +2414,23 @@ if __name__ == '__main__':
     figs_fronts = {}
 
     # todo for test copy code here for quick test
-    # csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/nqueens/no_evolution_some_errors_saug/gia_variants/gia_versions_objective_manager/mo_gia_versions_objective_manager_solutions_and_stats.csv"
-    #
-    # problem = "nqueens"  # ukp, nqueens, rcpsp, sims_cost_clouds, automotive, flowshop_permutation
-    #
-    # df = analysis.csv_to_df(csv_file_path)
-    #
-    # # Get images time vs instances solved
-    # if problem == "ukp":
-    #     objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
-    # elif problem == "nqueens":
-    #     objs_elements, pattern_template = get_info_similar_instances_nqueens()
-    # elif problem == "rcpsp":
-    #     objs_elements, pattern_template = get_info_similar_instances_rcpsp()
-    # elif problem == "sims_cost_clouds":
-    #     # todo deal with sims correctly
-    #     objs_elements, pattern_template = get_info_similar_instances_sims()
-    #
-    # figs = {}
-    # figs = analysis.plot_time_vs_completed_instances_for_problem(df, problem, objs_elements, pattern_template, figs)
-    # chec= 1
+    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/saug_gava_disjunctive_gias/mo_saug_gava_disjunctive_gias_solutions_and_stats.csv"
+
+    problem = "rcpsp"  # ukp, nqueens, rcpsp, sims_cost_clouds, automotive, flowshop_permutation
+
+    df = analysis.csv_to_df(csv_file_path)
+
+    # Get images time vs instances solved
+    if problem == "ukp":
+        objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
+    elif problem == "nqueens":
+        objs_elements, pattern_template = get_info_similar_instances_nqueens()
+    elif problem == "rcpsp":
+        objs_elements, pattern_template = get_info_similar_instances_rcpsp()
+    elif problem == "sims_cost_clouds":
+        # todo deal with sims correctly
+        objs_elements, pattern_template = get_info_similar_instances_sims()
+
+    figsHVTime = {}
+    figsHVTime = analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template, figsHVTime,
+                                                                plot_variance=True)
