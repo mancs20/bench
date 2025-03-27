@@ -2117,7 +2117,7 @@ class MoAnalysis:
         return figs
 
     # -------------------------------------------------------------------------------------------------------------------
-    # ----------------- Hypervolume vs Time-------------------------------------------------------------------------------
+    # ----------------- Hypervolume vs Time------------------------------------------------------------------------------
     # -------------------------------------------------------------------------------------------------------------------
     def plot_normalized_hypervolume_evolution(self, df, problem_name, objs_elements, pattern_template, figs,
                                               plot_variance=False):
@@ -2371,6 +2371,97 @@ class MoAnalysis:
             hypervolumes.append(hv)
 
         return times, hypervolumes
+
+    # -------------------------------------------------------------------------------------------------------------------
+    # ----------------- Cumulative time vs cumulative normalized HV-----------------------------------------------------
+    # -------------------------------------------------------------------------------------------------------------------
+    def plot_cumulative_hv_vs_time(self, data, problem_name, figs):
+        strategies = data["global"].keys()
+        colors = dict(zip(strategies, sns.color_palette("colorblind", len(strategies))))
+        markers = dict(zip(strategies, ['o', 's', '^', 'D', 'X', '*']))
+
+        for obj, obj_data in data["objectives"].items():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.set_title(f"{problem_name} - {obj} objectives", fontsize=16)
+            for strategy in strategies:
+                hv = obj_data[strategy]["hv"]
+                time = obj_data[strategy]["time"]
+                ax.plot(time, hv,
+                        label=strategy,
+                        color=colors[strategy],
+                        linestyle='-', linewidth=3)
+            ax.set_xlabel("Cumulative time (s)", fontsize=14)
+            ax.set_ylabel("Cumulative normalized hypervolume", fontsize=14)
+            ax.tick_params(axis='both', labelsize=13)
+            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.tight_layout()
+            figs[f"cumulative_hv_vs_time_{problem_name}_{obj}obj"] = fig
+            plt.show()
+
+        # Global plot
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title(f"{problem_name} - All instances", fontsize=16)
+        for strategy in strategies:
+            hv = data["global"][strategy]["hv"]
+            time = data["global"][strategy]["time"]
+            ax.plot(time, hv,
+                    label=strategy,
+                    color=colors[strategy],
+                    linestyle='-', linewidth=3)
+        ax.set_xlabel("Cumulative time (s)", fontsize=14)
+        ax.set_ylabel("Cumulative normalized hypervolume", fontsize=14)
+        ax.tick_params(axis='both', labelsize=13)
+        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        figs[f"cumulative_hv_vs_time_{problem_name}_all"] = fig
+        plt.show()
+
+    def get_cumulative_hv_vs_time_data(self, df, problem_name, objs_elements, pattern_template):
+        df_problem = df
+        strategies = df_problem[self.front_strategy].unique()
+
+        data = {
+            "objectives": {},
+            "global": {strategy: {"hv": [], "time": []} for strategy in strategies}
+        }
+
+        for strategy in strategies:
+            # Get all instances solved by the strategy
+            strat_df = df_problem[df_problem[self.front_strategy] == strategy].copy()
+            if strat_df.empty:
+                continue
+
+            # Normalize globally by per-instance best HV
+            instance_max_hv = df_problem.groupby(self.instance)[self.hypervolume].max()
+            strat_df["normalized_hv"] = strat_df[self.hypervolume] / strat_df[self.instance].map(instance_max_hv)
+            strat_df = strat_df.dropna(subset=["normalized_hv", self.time])
+
+            # ---------- GLOBAL ----------
+            strat_df_sorted = strat_df.sort_values(by=["normalized_hv", self.time], ascending=[False, True])
+            cum_hv = strat_df_sorted["normalized_hv"].cumsum()
+            cum_time = strat_df_sorted[self.time].cumsum()
+            data["global"][strategy]["hv"] = cum_hv.tolist()
+            data["global"][strategy]["time"] = cum_time.tolist()
+
+            # ---------- PER OBJECTIVE ----------
+            for obj, elements_list in objs_elements.items():
+                pattern_mask = strat_df[self.instance].apply(
+                    lambda x: any(pattern_template.format(obj=obj, elements=el) in x for el in elements_list)
+                )
+                strat_df_obj = strat_df[pattern_mask].copy()
+
+                strat_df_obj_sorted = strat_df_obj.sort_values(by=["normalized_hv", self.time], ascending=[False, True])
+                cum_hv_obj = strat_df_obj_sorted["normalized_hv"].cumsum()
+                cum_time_obj = strat_df_obj_sorted[self.time].cumsum()
+
+                if obj not in data["objectives"]:
+                    data["objectives"][obj] = {}
+                data["objectives"][obj][strategy] = {
+                    "hv": cum_hv_obj.tolist(),
+                    "time": cum_time_obj.tolist()
+                }
+
+        return data
 
     def set_stats_exhaustive(self, stats_exhaustive, pretty_name):
         self.stats_exhaustive = stats_exhaustive
