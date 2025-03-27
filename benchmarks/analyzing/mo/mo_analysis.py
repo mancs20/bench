@@ -1,4 +1,6 @@
 import ast
+import re
+import shutil
 from collections import Counter
 
 import pandas as pd
@@ -87,8 +89,8 @@ def get_info_similar_instances_rcpsp():
 
 
 def get_info_similar_instances_sims():
-    objs_elements = {2: [30, 50, 100, 150, 200], 3: [30, 50, 100, 150, 200]}
-    pattern_template = "_{elements}"
+    objs_elements = {"cost_clouds": [30, 50, 100, 150, 200], "cost_clouds_angle": [30, 50, 100, 150, 200]}
+    pattern_template = "_{elements}_{obj}$"
     return objs_elements, pattern_template
 
 
@@ -116,6 +118,9 @@ def compute_hv(front, reference_point, double_check_non_dominance=True):
     front = np.array(front)
     if front.size == 0:
         return 0.0
+
+    reference_point = np.array(reference_point)
+    front = np.array(front)
 
     if is_maximization_problem(front, reference_point):
         # convert maximization to minimization to calculate the Hypervolume using the pymoo library
@@ -191,6 +196,11 @@ class MoAnalysis:
         else:
             self.all_solutions = all_solutions
 
+        # strategies's colors
+        self.fixed_strategies = ["GIA", "GIAub", "GIAubL", "DisjProg", "Gavanelli", "Saugmecon"]
+        self.strategy_colors = dict(zip(self.fixed_strategies, sns.color_palette("colorblind", len(self.fixed_strategies))))
+        self.strategy_markers = dict(zip(self.fixed_strategies, ['o', 's', '^', 'D', 'X', '*']))
+
     @staticmethod
     def csv_to_df(file_path):
         df = pd.read_csv(file_path, delimiter=',')
@@ -241,7 +251,7 @@ class MoAnalysis:
         formatted_row = []
 
         data_columns_start_pos = len(list_header_rows)
-        numeric_values = row.iloc[data_columns_start_pos:].astype(float)
+        numeric_values = row.iloc[data_columns_start_pos:].apply(pd.to_numeric, errors='coerce')
 
         # Get unique statistics (e.g., "time(s)", "nodes") from column headers
         stats_columns = {}
@@ -261,13 +271,12 @@ class MoAnalysis:
 
         # Format row values
         for col, value in zip(row.index, row):
-            if is_number(value):
-                num_value = float(value) if value not in ["NaN", "nan", None] else None
+            if is_number(value) and not pd.isna(value):  # skip np.nan
+                num_value = float(value)
                 # Get values for this stat if available, otherwise use just the current number
                 column_values = numeric_values[stats_columns[col[1]]] if col[1] in stats_columns else [num_value]
                 formatted_value = (
                     f"${MoAnalysis.format_number_dynamic(num_value, column_values, base_precision=6, min_precision=2)}$"
-                    if num_value is not None else ""
                 )
                 # Apply bold if this value is the lowest for its stat
                 stat_name = col[1]
@@ -278,7 +287,7 @@ class MoAnalysis:
                     formatted_value = f"{formatted_value}"
                 formatted_row.append(formatted_value)
             else:
-                formatted_row.append(str(value))
+                formatted_row.append("-" if pd.isna(value) else str(value))
 
         return " & ".join(map(str, formatted_row)) + " \\\\"
 
@@ -2012,11 +2021,13 @@ class MoAnalysis:
             row = list(group_keys)
             for strategy in strategies:
                 filtered_group = group[group[self.front_strategy] == strategy]
-                row.extend(filtered_group.iloc[0][stats_columns].values)
+                if not filtered_group.empty:
+                    row.extend(filtered_group.iloc[0][stats_columns].values)
+                else:
+                    row.extend([np.nan] * len(stats_columns))
             table.loc[len(table)] = row
 
-        table = table.fillna(0)
-        table = table.map(format_number)
+        table = table.map(lambda x: "--" if pd.isna(x) else format_number(x))
         return table
 
     # -------------------------------------------------------------------------------------------------------------------
@@ -2029,11 +2040,8 @@ class MoAnalysis:
         One plot per number of objectives and a global one for all objectives.
         """
 
-        # df_problem = df[df[self.problem] == problem_name]
         df_problem = df
-        strategies = df_problem[self.front_strategy].unique()
-        strategy_colors = dict(zip(strategies, sns.color_palette("colorblind", len(strategies))))
-        strategy_markers = dict(zip(strategies, ['o', 's', '^', 'D', 'X', '*']))  # added
+        strategies = self.fixed_strategies  # use consistent strategy list
 
         overall_times = {strategy: [] for strategy in strategies}
         overall_counts = {strategy: [] for strategy in strategies}
@@ -2045,17 +2053,20 @@ class MoAnalysis:
             local_times = {strategy: [] for strategy in strategies}
             local_counts = {strategy: [] for strategy in strategies}
 
+            obj_strategies = None
             for elements in elements_list:
                 pattern = pattern_template.format(obj=obj, elements=elements)
                 matched_df = df_problem[df_problem[self.instance].str.contains(pattern, regex=True)]
+                if obj_strategies is None:
+                    obj_strategies = matched_df[self.front_strategy].unique()
 
                 # Find instance names common to all strategies
                 instance_counts = matched_df.groupby(self.instance)[self.front_strategy].nunique()
-                common_instances = instance_counts[instance_counts == len(strategies)].index
+                common_instances = instance_counts[instance_counts == len(obj_strategies)].index
 
                 for inst in common_instances:
                     inst_df = matched_df[matched_df[self.instance] == inst]
-                    for strategy in strategies:
+                    for strategy in obj_strategies:
                         strat_row = inst_df[inst_df[self.front_strategy] == strategy]
                         if strat_row.empty:
                             continue
@@ -2066,19 +2077,21 @@ class MoAnalysis:
                         local_times[strategy].append(resolution_time)
                         overall_times[strategy].append(resolution_time)
 
-            # Sort and count
+            # Plot per-objective
             for strategy in strategies:
+                if not local_times[strategy]:
+                    continue  # ✅ skip strategies that didn't appear in this objective group
                 times_sorted = sorted(local_times[strategy])
                 completed = list(range(1, len(times_sorted) + 1))
                 local_counts[strategy] = completed
                 ax.plot(times_sorted, completed,
-                        color=strategy_colors[strategy],
+                        color=self.strategy_colors[strategy],
                         linestyle='-', linewidth=1.5)
                 ax.scatter(times_sorted, completed,
                            label=strategy,
-                           edgecolor=strategy_colors[strategy],  # outer color
-                           facecolor='none',  # hollow marker
-                           marker=strategy_markers[strategy],
+                           edgecolor=self.strategy_colors[strategy],
+                           facecolor='none',
+                           marker=self.strategy_markers[strategy],
                            s=80)
 
             ax.set_title(title, fontsize=16)
@@ -2093,17 +2106,19 @@ class MoAnalysis:
         # Global plot for all objectives
         fig, ax = plt.subplots(figsize=(10, 6))
         for strategy in strategies:
+            if not overall_times[strategy]:
+                continue  # ✅ skip strategies that didn't appear globally
             times_sorted = sorted(overall_times[strategy])
             completed = list(range(1, len(times_sorted) + 1))
             overall_counts[strategy] = completed
             ax.plot(times_sorted, completed,
-                    color=strategy_colors[strategy],
+                    color=self.strategy_colors[strategy],
                     linestyle='-', linewidth=1.5)
             ax.scatter(times_sorted, completed,
                        label=strategy,
-                       edgecolor=strategy_colors[strategy],  # outer color
-                       facecolor='none',  # hollow marker
-                       marker=strategy_markers[strategy],
+                       edgecolor=self.strategy_colors[strategy],
+                       facecolor='none',
+                       marker=self.strategy_markers[strategy],
                        s=80)
 
         ax.set_title(f"{problem_name} - All instances", fontsize=16)
@@ -2114,6 +2129,7 @@ class MoAnalysis:
         figs[f"time_vs_completed_{problem_name}_all"] = fig
         plt.tight_layout()
         plt.show()
+
         return figs
 
     # -------------------------------------------------------------------------------------------------------------------
@@ -2164,8 +2180,8 @@ class MoAnalysis:
                         ax.plot(
                             normalized_time, means,
                             label=strategy,
-                            color=strategy_colors[strategy],
-                            marker=strategy_markers[strategy],
+                            color=self.strategy_colors[strategy],
+                            marker=self.strategy_markers[strategy],
                             linestyle='None',
                             markersize=4,
                             markerfacecolor='none'
@@ -2176,8 +2192,8 @@ class MoAnalysis:
                                 normalized_time,
                                 means,
                                 yerr=stds,
-                                fmt=strategy_markers[strategy],
-                                color=strategy_colors[strategy],
+                                fmt=self.strategy_markers[strategy],
+                                color=self.strategy_colors[strategy],
                                 markersize=3,
                                 capsize=2,
                                 linestyle='None'
@@ -2220,8 +2236,8 @@ class MoAnalysis:
                     ax.plot(
                         normalized_time, means,
                         label=strategy,
-                        color=strategy_colors[strategy],
-                        marker=strategy_markers[strategy],
+                        color=self.strategy_colors[strategy],
+                        marker=self.strategy_markers[strategy],
                         linestyle='None',
                         markersize=4,
                         markerfacecolor='none'
@@ -2231,8 +2247,8 @@ class MoAnalysis:
                             normalized_time,
                             means,
                             yerr=stds,
-                            fmt=strategy_markers[strategy],
-                            color=strategy_colors[strategy],
+                            fmt=self.strategy_markers[strategy],
+                            color=self.strategy_colors[strategy],
                             markersize=3,
                             capsize=2,
                             linestyle='None'
@@ -2376,9 +2392,10 @@ class MoAnalysis:
     # ----------------- Cumulative time vs cumulative normalized HV-----------------------------------------------------
     # -------------------------------------------------------------------------------------------------------------------
     def plot_cumulative_hv_vs_time(self, data, problem_name, figs):
-        strategies = data["global"].keys()
-        colors = dict(zip(strategies, sns.color_palette("colorblind", len(strategies))))
-        markers = dict(zip(strategies, ['o', 's', '^', 'D', 'X', '*']))
+        # strategies = data["global"].keys()
+        strategies = self.fixed_strategies
+        # colors = dict(zip(strategies, sns.color_palette("colorblind", len(strategies))))
+        # markers = dict(zip(strategies, ['o', 's', '^', 'D', 'X', '*']))
 
         for obj, obj_data in data["objectives"].items():
             fig, ax = plt.subplots(figsize=(10, 6))
@@ -2388,7 +2405,7 @@ class MoAnalysis:
                 time = obj_data[strategy]["time"]
                 ax.plot(time, hv,
                         label=strategy,
-                        color=colors[strategy],
+                        color=self.strategy_colors[strategy],
                         linestyle='-', linewidth=3)
             ax.set_xlabel("Cumulative time (s)", fontsize=14)
             ax.set_ylabel("Cumulative normalized hypervolume", fontsize=14)
@@ -2406,7 +2423,7 @@ class MoAnalysis:
             time = data["global"][strategy]["time"]
             ax.plot(time, hv,
                     label=strategy,
-                    color=colors[strategy],
+                    color=self.strategy_colors[strategy],
                     linestyle='-', linewidth=3)
         ax.set_xlabel("Cumulative time (s)", fontsize=14)
         ax.set_ylabel("Cumulative normalized hypervolume", fontsize=14)
@@ -2415,6 +2432,7 @@ class MoAnalysis:
         plt.tight_layout()
         figs[f"cumulative_hv_vs_time_{problem_name}_all"] = fig
         plt.show()
+        return figs
 
     def get_cumulative_hv_vs_time_data(self, df, problem_name, objs_elements, pattern_template):
         df_problem = df
@@ -2446,7 +2464,7 @@ class MoAnalysis:
             # ---------- PER OBJECTIVE ----------
             for obj, elements_list in objs_elements.items():
                 pattern_mask = strat_df[self.instance].apply(
-                    lambda x: any(pattern_template.format(obj=obj, elements=el) in x for el in elements_list)
+                    lambda x: any(re.search(pattern_template.format(obj=obj, elements=el), x) for el in elements_list)
                 )
                 strat_df_obj = strat_df[pattern_mask].copy()
 
@@ -2463,6 +2481,111 @@ class MoAnalysis:
 
         return data
 
+    #--------------------------------------------------------------------------------------------------------------------
+    #----------------- Histograms Best Hypervolume ---------------------------------------------------------------------
+    #--------------------------------------------------------------------------------------------------------------------
+    def plot_best_hypervolume_histogram(self, df, problem_name, objs_elements, pattern_template, figs):
+        """
+        Plots histogram showing how often each strategy is exclusive best, shared best, or second best.
+        One plot per objective + a global one.
+        Returns: figs dictionary
+        """
+
+        global_df, per_objective_data = self.categorize_strategy_performance_grouped_by_objective(
+            df, objs_elements, pattern_template
+        )
+
+        colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]  # Exclusive, Shared, Second
+
+        def _plot(df_counts, title):
+            df_counts = df_counts.set_index("Strategy")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            df_counts[["Exclusive best", "Shared best", "Second best"]].plot(
+                kind='bar', stacked=True, color=colors, ax=ax
+            )
+            ax.set_title(title, fontsize=16)
+            ax.set_ylabel("Number of Instances", fontsize=14)
+            ax.set_xlabel("Strategy", fontsize=14)
+            ax.tick_params(axis='both', labelsize=12)
+            ax.legend(title="Category", bbox_to_anchor=(1.05, 1), loc="upper left")
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            return fig
+
+        # Global plot
+        fig_global = _plot(global_df, f"{problem_name} – All objectives – Best hypervolume per strategy")
+        figs[f"best_hv_global_{problem_name}"] = fig_global
+
+        # Per-objective plots
+        for obj, df_counts in per_objective_data.items():
+            fig = _plot(df_counts, f"{problem_name} – {obj} objectives – Best Hypervolume per Strategy")
+            figs[f"best_hv_obj_{obj}_{problem_name}"] = fig
+
+        return figs
+
+    def categorize_strategy_performance_grouped_by_objective(self, df, objs_elements, pattern_template):
+        """
+        Categorize each strategy as Exclusive Best, Shared Best, or Second Best per objective.
+        Also return the global aggregation over all objectives.
+        """
+        results_per_objective = {}
+        global_exclusive = Counter()
+        global_shared = Counter()
+        global_second = Counter()
+
+        for obj, elements_list in objs_elements.items():
+            exclusive = Counter()
+            shared = Counter()
+            second = Counter()
+
+            for elements in elements_list:
+                pattern = pattern_template.format(obj=obj, elements=elements)
+                matched_df = df[df[self.instance].str.contains(pattern, regex=True)]
+
+                for inst, inst_group in matched_df.groupby(self.instance):
+                    sorted_group = inst_group.sort_values(by=self.hypervolume, ascending=False)
+                    top_hv = sorted_group[self.hypervolume].iloc[0]
+                    top_strats = sorted_group[sorted_group[self.hypervolume] == top_hv][self.front_strategy].tolist()
+
+                    if len(top_strats) == 1:
+                        exclusive[top_strats[0]] += 1
+                    else:
+                        for s in top_strats:
+                            shared[s] += 1
+
+                    # Second best
+                    unique_hv = sorted_group[self.hypervolume].unique()
+                    if len(unique_hv) > 1:
+                        second_best_hv = unique_hv[1]
+                        second_best_strats = sorted_group[sorted_group[self.hypervolume] == second_best_hv][
+                            self.front_strategy].tolist()
+                        for s in second_best_strats:
+                            second[s] += 1
+
+            # Save results per objective
+            all_strats = set(df[self.front_strategy])
+            results_per_objective[obj] = pd.DataFrame({
+                "Strategy": list(all_strats),
+                "Exclusive best": [exclusive[s] for s in all_strats],
+                "Shared best": [shared[s] for s in all_strats],
+                "Second best": [second[s] for s in all_strats],
+            })
+
+            # Update global
+            for k in exclusive: global_exclusive[k] += exclusive[k]
+            for k in shared: global_shared[k] += shared[k]
+            for k in second: global_second[k] += second[k]
+
+        all_strats = set(df[self.front_strategy])
+        global_df = pd.DataFrame({
+            "Strategy": list(all_strats),
+            "Exclusive best": [global_exclusive[s] for s in all_strats],
+            "Shared best": [global_shared[s] for s in all_strats],
+            "Second best": [global_second[s] for s in all_strats],
+        })
+
+        return global_df, results_per_objective
+
     def set_stats_exhaustive(self, stats_exhaustive, pretty_name):
         self.stats_exhaustive = stats_exhaustive
         self.stats_exhaustive_pretty_name = pretty_name
@@ -2470,6 +2593,265 @@ class MoAnalysis:
     def set_stats_non_exhaustive(self, stats_non_exhaustive, pretty_name):
         self.stats_non_exhaustive = stats_non_exhaustive
         self.stats_non_exhaustive_pretty_name = pretty_name
+
+    def set_fixed_strategies(self, fixed_strategies=None, strategy_colors=None, strategy_markers=None):
+        if fixed_strategies is not None:
+            self.fixed_strategies = fixed_strategies
+
+        if strategy_colors is not None:
+            self.strategy_colors = strategy_colors
+
+        if strategy_markers is not None:
+            self.strategy_markers = strategy_markers
+
+
+class SaveAllResultsCP2025:
+
+    folder_path = "cp2025"
+
+    def __init__(self, csv_paths_problem, with_evolution=False):
+        self.csv_paths_problem = csv_paths_problem  # expecting list of (csv_path, problem_name) tuples
+        # Ex: csvs = [("rcpsp.csv", "rcpsp"), ("ukp.csv", "ukp")]
+        # runner = SaveAllResultsCP2025(csvs)
+        self.analysis = MoAnalysis()
+        self.with_evolution = with_evolution
+
+
+    def save_all_results(self):
+        print("Starting to save all results. Here we go!")
+        print(f"With evolution: {self.with_evolution}")
+        for csv_path, problem in self.csv_paths_problem:
+            self.save_results(csv_path, problem)
+
+    def save_results(self, csv_path, problem):
+        df = self.analysis.csv_to_df(csv_path)
+        print(f"Processing {csv_path} for problem {problem}")
+
+        figs = {}
+        latex_text = ""
+        if self.with_evolution:
+            df = self.add_hv_computed_evolution_if_not_present(df, csv_path)
+        df = self.beautify_strategies_names(df)
+        print("Safety checks")
+        # if "sims" in problem:
+        #     df = self.rename_sims_strategies_to_indicate_objectives(df)
+
+        if not self.safety_checks_exhaustive(df):
+            print(f"Safety checks for exhaustive conditions has failed for {csv_path}")
+            return
+        if not self.safety_check_fronts(df):
+            print(f"Safety checks for fronts has failed for {csv_path}")
+            return
+
+        print("Safety checks passed")
+        print("Creating pretty tables")
+        self.save_latex_table_text(df, problem)
+        print("Creating pretty tables done")
+        print("Creating plots")
+        self.save_all_figs(df, problem)
+        print("Creating plots done")
+        print("Finished processing")
+
+    def add_hv_computed_evolution_if_not_present(self, df, csv_file_path):
+        if "hv_computed_evolution" not in df.columns:
+            backup_path = csv_file_path.replace(".csv", "_backup.csv")
+            shutil.copyfile(csv_file_path, backup_path)
+            print(f"Backup of original CSV saved to {backup_path}")
+
+            df["hv_computed_evolution"] = df.apply(
+                lambda row: [[t, hv] for t, hv in zip(*self.analysis.compute_hypervolume_vs_time_from_fronts(row))],
+                axis=1
+            )
+            # Save updated DataFrame to CSV
+            df.to_csv(csv_file_path, index=False)
+            print(f"Modified CSV file with hv_computed_evolution saved to {csv_file_path}")
+        return df
+
+    def beautify_strategies_names(self, df):
+        df = df.copy()
+        df.front_generator = df.front_generator.str.replace("GIA_boundedLazy", "GIAubL")
+        df.front_generator = df.front_generator.str.replace("GIA_bounded", "GIAub")
+        df.front_generator = df.front_generator.str.replace("ParetoGavanelliGlobalConstraint", "Gavanelli")
+        df.front_generator = df.front_generator.str.replace("ParetoDisjunctiveProgramming", "DisjProg")
+
+        # todo if more strategies
+        # fixed_strategies = ["GIA", "GIAub", "GIAubL", "DisjProg", "Gavanelli", "Saugmecon"]  # example
+        # strategy_colors = dict(zip(fixed_strategies, sns.color_palette("colorblind", len(fixed_strategies))))
+        # strategy_markers = dict(zip(fixed_strategies, ['o', 's', '^', 'D', 'X', '*']))
+
+        # self.analysis.set_fixed_strategies(fixed_strategies, strategy_colors, strategy_markers)
+
+        return df
+
+    def rename_sims_strategies_to_indicate_objectives(self, df):
+        # In lagos nigereia there were 145 images, I want to rename them to 150 because it's similar to the other
+        # instances with 150 images
+        df = df.copy()
+        df.instance = df.instance.str.replace("145", "150")
+        return df
+
+    def safety_checks_exhaustive(self, df):
+        # Count the number of unique strategies
+        number_of_strategies = df[self.analysis.front_strategy].nunique()
+
+        # Verify all the groups have the same number of strategies
+        group_sizes = df.groupby(self.analysis.instance).size()
+        groups_with_missing_strategies = group_sizes[group_sizes != number_of_strategies]
+        if groups_with_missing_strategies.size > 0:
+            print("There are groups with different numbers of strategies")
+            print(groups_with_missing_strategies)
+
+        # Ensure hypervolume column has no NaN values
+        df.fillna({"hypervolume": 0}, inplace=True)
+
+        # Filter only rows where exhaustive == True
+        df_exhaustive = df[df[self.analysis.exhaustive] == True]
+
+        # Group exhaustive=True rows by instance and count unique hypervolumes
+        hypervolume_diff = df_exhaustive.groupby(self.analysis.instance)[self.analysis.hypervolume].nunique()
+        hypervolume_diff = hypervolume_diff[hypervolume_diff > 1]
+
+        if hypervolume_diff.size > 0:
+            print("There are groups where exhaustive=True rows have different hypervolumes:")
+            print(hypervolume_diff)
+            return False
+        else:
+            print("The strategies that are exhaustive produce the same hypervolume")
+
+        # 🔹 Count groups where NOT all rows have exhaustive = True
+        count_not_all_exhaustive = df.groupby(self.analysis.instance)[self.analysis.exhaustive].apply(lambda x: not x.all()).sum()
+
+        total_groups = df[self.analysis.instance].nunique()
+
+        print(
+            f"Number of groups where not all strategies are exhaustive = True: {count_not_all_exhaustive} / {total_groups}")
+
+        return True
+
+    def safety_check_fronts(self, df):
+        row = df.iloc[0]
+        ref_point = row["reference_point"]
+        ref_point = ast.literal_eval(ref_point)
+        # convert from string to np array
+        pareto_front = row[self.analysis.pareto_front]  # is a string
+        pareto_front = ast.literal_eval(pareto_front)
+        maximization_problems = is_maximization_problem(pareto_front, ref_point)
+
+        df_filtered = df.dropna(subset=["pareto_front"])
+        front_analysis_results = ["instance", "front_generator", "new_value"]
+        results_df = pd.DataFrame(columns=front_analysis_results)
+        for _, row in df_filtered.iterrows():
+            pareto_front_points = row["pareto_front"]
+            if isinstance(pareto_front_points, str):
+                pareto_front_points = ast.literal_eval(pareto_front_points)
+
+            dominated_points = MoAnalysis.check_points_in_front_are_not_dominated(pareto_front_points,
+                                                                                maximization_problems)
+            if len(dominated_points) > 0:
+                # Create a new row
+                new_row = pd.DataFrame([{
+                    "instance": row["instance"],
+                    "front_generator": row["front_generator"],
+                    "dominated_points": dominated_points
+                }])
+                # Append to results DataFrame
+                results_df = pd.concat([results_df, new_row], ignore_index=True)
+        if results_df.empty:
+            print("All the points in the pareto front are not dominated")
+        else:
+            print("There are points in the pareto front that are dominated")
+            print(results_df)
+            return False
+        return True
+
+    def save_latex_table_text(self, df, problem):
+        # Get evaluation of the experiments like in the Disjunctive Programming paper for exhasutive and non exhaustive instances
+        # todo select the part of the df in which you're interested
+        df_for_tables = df
+
+        # stats to display
+        stats_exhaustive = [["time(s)", "front_cardinality"], ["sum_solutions_nodes", "front_cardinality"]]
+        stats_exhaustive_pretty_name = [["time(s)"], ["nodes"]]
+
+        subfolder_path = os.path.join(self.folder_path, problem)
+        text_to_save = ""
+        non_stats_headers = None  # they are inside the code
+        # title_exhaustive = "Comparison strategies when all exhaustive"
+        # title_non_exhaustive = "Comparison strategies when not all exhaustive"
+        for stats, stats_pretty_name in zip(stats_exhaustive, stats_exhaustive_pretty_name):
+            self.analysis.set_stats_exhaustive(stats, stats_pretty_name)
+            if problem == "ukp":
+                table_results = self.analysis.average_similar_ukp_moolibrary_instances(df, non_stats_headers)
+            elif problem == "nqueens":
+                table_results = self.analysis.average_similar_nqueens_instances(df, non_stats_headers)
+            elif problem == "rcpsp":
+                table_results = self.analysis.average_similar_rcpsp_instances(df, non_stats_headers)
+            elif problem == "sims":
+                # todo deal with sims correctly
+                table_results = self.analysis.average_similar_sims_instances(df, non_stats_headers)
+            else:
+                print("The problem is not recognized")
+                table_results = [None, None]
+
+            problem_capitalized = problem.upper()
+            title_exhaustive = f"{problem_capitalized}. Comparison strategies when all exhaustive"
+            title_non_exhaustive = f"{problem_capitalized}. Comparison strategies when not all exhaustive"
+
+            if table_results[0] is not None:
+                non_stats_headers = ["K", "n", "instances", "p"]
+                table_exhaustive_latex = self.analysis.disjunctive_paper_style_dataframe_to_latex(table_results[0],
+                                                                                             non_stats_headers, True,
+                                                                                             title_exhaustive)
+                print(table_exhaustive_latex)
+                text_to_save += "\n\n"
+                text_to_save += table_exhaustive_latex
+        if table_results[1] is not None:
+            non_stats_headers = ["K", "n", "instances"]
+            table_non_exhaustive_latex = self.analysis.disjunctive_paper_style_dataframe_to_latex(table_results[1],
+                                                                                             non_stats_headers, False,
+                                                                                             title_non_exhaustive)
+            print("---------------Comparison strategies when not all exhaustive----------------------")
+            print(table_non_exhaustive_latex)
+            text_to_save += "\n\n"
+            text_to_save += table_non_exhaustive_latex
+        # Save the text to a file
+        output_dir = os.path.join(self.folder_path, problem)
+        os.makedirs(output_dir, exist_ok=True)
+        text_file_path = os.path.join(output_dir, f"table_results_{problem}.tex")
+        with open(text_file_path, "w") as text_file:
+            text_file.write(text_to_save)
+        print(f"Saved table results to '{text_file_path}'")
+
+    def save_all_figs(self, df, problem):
+        if problem == "ukp":
+            objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
+        elif problem == "nqueens":
+            objs_elements, pattern_template = get_info_similar_instances_nqueens()
+        elif problem == "rcpsp":
+            objs_elements, pattern_template = get_info_similar_instances_rcpsp()
+        elif problem == "sims":
+            # todo deal with sims correctly
+            objs_elements, pattern_template = get_info_similar_instances_sims()
+
+        figs = {}
+        figs = self.analysis.plot_time_vs_completed_instances_for_problem(df, problem, objs_elements, pattern_template, figs)
+        if self.with_evolution:
+            figs = self.analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template, figs, plot_variance=False)
+        data = self.analysis.get_cumulative_hv_vs_time_data(df, problem, objs_elements, pattern_template)
+        figs = self.analysis.plot_cumulative_hv_vs_time(data, problem, figs)
+        figs = self.analysis.plot_best_hypervolume_histogram(df, problem, objs_elements, pattern_template, figs)
+
+        import os
+        import matplotlib.pyplot as plt
+
+        output_dir = os.path.join(self.folder_path, problem)
+        os.makedirs(output_dir, exist_ok=True)
+
+        for name, fig in figs.items():
+            fig_path = os.path.join(output_dir, f"{name}.pdf")
+            fig.savefig(fig_path, format='pdf', bbox_inches='tight')
+            plt.close(fig)  # optional: frees memory if you're done
+        print(f"Saved {len(figs)} figures to '{output_dir}'")
 
 
 class Cols:
