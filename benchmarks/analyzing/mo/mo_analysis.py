@@ -302,7 +302,7 @@ class MoAnalysis:
         ).tolist()
 
         # Construct LaTeX table
-        latex_table = "\\begin{table}[h]\n\\centering\n\\begin{tabular}{" + "r" * len(table.columns) + "}\n\\hline\n"
+        latex_table = "\\begin{table}[h]\n\\centering\n\\caption{" + title + "}\n\\begin{tabular}{" + "r" * len(table.columns) + "}\n\\hline\n"
 
         # Add headers
         strategy_counts = Counter([col[0] for col in table.columns if col[0] != ""])  # Count occurrences of each
@@ -331,7 +331,7 @@ class MoAnalysis:
         latex_table += header_second_row
 
         latex_table += "\n".join(
-            latex_rows) + "\n\\hline\n\\end{tabular}\n\\caption{" + title + "}\n\\end{table}"
+            latex_rows) + "\n\\hline\n\\end{tabular}\n\\end{table}"
 
         return latex_table
 
