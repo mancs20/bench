@@ -44,6 +44,7 @@ def format_number(x):
         return int(x) if x == int(x) else f"{x:.2f}"
     return x  # Keep non-numeric values unchanged
 
+
 #
 # stats = ["time(s)", "sum_solutions_resolution_time(s)", "sum_solutions_nodes",
 #          "sum_solutions_backtracks", "sum_solutions_fails",
@@ -198,7 +199,8 @@ class MoAnalysis:
 
         # strategies's colors
         self.fixed_strategies = ["GIA", "GIAub", "GIAubL", "DisjProg", "Gavanelli", "Saugmecon"]
-        self.strategy_colors = dict(zip(self.fixed_strategies, sns.color_palette("colorblind", len(self.fixed_strategies))))
+        self.strategy_colors = dict(
+            zip(self.fixed_strategies, sns.color_palette("colorblind", len(self.fixed_strategies))))
         self.strategy_markers = dict(zip(self.fixed_strategies, ['o', 's', '^', 'D', 'X', '*']))
 
     @staticmethod
@@ -302,7 +304,8 @@ class MoAnalysis:
         ).tolist()
 
         # Construct LaTeX table
-        latex_table = "\\begin{table}[h]\n\\centering\n\\caption{" + title + "}\n\\begin{tabular}{" + "r" * len(table.columns) + "}\n\\hline\n"
+        latex_table = "\\begin{table}[h]\n\\centering\n\\caption{" + title + "}\n\\begin{tabular}{" + "r" * len(
+            table.columns) + "}\n\\hline\n"
 
         # Add headers
         strategy_counts = Counter([col[0] for col in table.columns if col[0] != ""])  # Count occurrences of each
@@ -1366,16 +1369,31 @@ class MoAnalysis:
         return True
 
     @staticmethod
-    def check_points_in_front_are_not_dominated(front, maximize=True):
+    def check_points_in_front_are_not_dominated(front, maximize=True, verbose=True, return_indices=False):
         dominated_points = []
+        id_dominated_points = []
 
         for i, point in enumerate(front):
             for j, other_point_in_front in enumerate(front):
                 if i != j and is_dominated(point, other_point_in_front, maximize):
-                    print(f"Point {point} is dominated by {other_point_in_front}")
+                    if verbose:
+                        print(f"Point {point} is dominated by {other_point_in_front}")
                     dominated_points.append(point)
+                    id_dominated_points.append(i)
                     break
-        return dominated_points
+        if return_indices:
+            return dominated_points, id_dominated_points
+        else:
+            return dominated_points
+
+    @staticmethod
+    def remove_dominated_points(front, maximize=None):
+        # remove the dominated points from the front using the id_dominated_points
+        _, id_dominated_points = MoAnalysis.check_points_in_front_are_not_dominated(
+            front, maximize=maximize, verbose=False, return_indices=True
+        )
+        # return [p for i, p in enumerate(front) if p not in dominated_points]
+        return [pt for i, pt in enumerate(front) if i not in id_dominated_points]
 
     def plot_specific_front(self, df, instance_to_process, figs, margin=0.05):
         df_copy = df.copy()
@@ -2349,7 +2367,7 @@ class MoAnalysis:
         times = []
         hypervolumes = []
         # convert from string to np array
-        pareto_front = row[self.pareto_front] # is a string
+        pareto_front = row[self.pareto_front]  # is a string
         pareto_front = ast.literal_eval(pareto_front)
 
         maximize = is_maximization_problem(pareto_front, ref_point)
@@ -2481,9 +2499,9 @@ class MoAnalysis:
 
         return data
 
-    #--------------------------------------------------------------------------------------------------------------------
-    #----------------- Histograms Best Hypervolume ---------------------------------------------------------------------
-    #--------------------------------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------------------
+    # ----------------- Histograms Best Hypervolume ---------------------------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------------------
     def plot_best_hypervolume_histogram(self, df, problem_name, objs_elements, pattern_template, figs):
         """
         Plots histogram showing how often each strategy is exclusive best, shared best, or second best.
@@ -2586,6 +2604,304 @@ class MoAnalysis:
 
         return global_df, results_per_objective
 
+    # -------------------------------------------------------------------------------------------------------------------
+    # ----------------- Normalized HV per strategy ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------------------------------------------------
+    def plot_normalized_hypervolume_per_strategy(self, df, problem_name, objs_elements, pattern_template, figs,
+                                                 data=None):
+        strategies = self.fixed_strategies
+        if data is None:
+            data = self.get_normalized_hv_per_strategy_data(df, problem_name, objs_elements, pattern_template)
+
+        for_plotting = data["objectives"]
+
+        # --------- PER OBJECTIVE ----------
+        for obj, obj_data in for_plotting.items():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.set_title(f"{problem_name} - Normalized HV per instance - {obj} objectives", fontsize=16)
+
+            for i, strategy in enumerate(strategies):
+                if strategy not in obj_data:
+                    continue
+                hv_sorted = obj_data[strategy]["hv"]
+                x = list(range(1, len(hv_sorted) + 1))
+
+                ax.plot(x, hv_sorted,
+                        label=strategy,
+                        color=self.strategy_colors[strategy],
+                        marker=self.strategy_markers[strategy],
+                        linestyle='-',
+                        markersize=6,
+                        markerfacecolor='none',  # Unfilled marker
+                        linewidth=1.5)
+
+            ax.set_xlabel("Instances (sorted by normalized HV)", fontsize=16)
+            ax.set_ylabel("Normalized HV", fontsize=14)
+            ax.tick_params(axis='both', labelsize=14)
+            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.tight_layout()
+            figs[f"normalized_hv_sorted_per_instance_{problem_name}_{obj}obj"] = fig
+            plt.show()
+
+        # --------- GLOBAL ----------
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title(f"{problem_name} - Normalized HV per instance - All instances", fontsize=16)
+
+        for i, strategy in enumerate(strategies):
+            if strategy not in data["global"]:
+                continue
+            hv_sorted = data["global"][strategy]["hv"]
+            x = list(range(1, len(hv_sorted) + 1))
+
+            ax.plot(x, hv_sorted,
+                    label=strategy,
+                    color=self.strategy_colors[strategy],
+                    marker=self.strategy_markers[strategy],
+                    linestyle='-',
+                    markersize=6,
+                    markerfacecolor='none',
+                    linewidth=1.5)
+
+        ax.set_xlabel("Instances (sorted by normalized HV)", fontsize=16)
+        ax.set_ylabel("Normalized HV", fontsize=14)
+        ax.tick_params(axis='both', labelsize=14)
+        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        figs[f"normalized_hv_sorted_per_instance_{problem_name}_all"] = fig
+        plt.show()
+
+        return figs
+
+    def get_normalized_hv_per_strategy_data(self, df, problem_name, objs_elements, pattern_template):
+        df_problem = df
+        strategies = df_problem[self.front_strategy].unique()
+
+        data = {
+            "objectives": {},
+            "global": {strategy: {"hv": []} for strategy in strategies}
+        }
+
+        # Precompute best HV per instance
+        instance_max_hv = df_problem.groupby(self.instance)[self.hypervolume].max()
+
+        for strategy in strategies:
+            strat_df = df_problem[df_problem[self.front_strategy] == strategy].copy()
+            if strat_df.empty:
+                continue
+
+            # Normalize hypervolume
+            strat_df["normalized_hv"] = strat_df[self.hypervolume] / strat_df[self.instance].map(instance_max_hv)
+            strat_df = strat_df.dropna(subset=["normalized_hv", self.time])
+
+            # ---------- GLOBAL ----------
+            strat_df_sorted = strat_df.sort_values(by=["normalized_hv", self.time], ascending=[False, True])
+            data["global"][strategy]["hv"] = strat_df_sorted["normalized_hv"].tolist()
+
+            # ---------- PER OBJECTIVE ----------
+            for obj, elements_list in objs_elements.items():
+                pattern_mask = strat_df[self.instance].apply(
+                    lambda x: any(re.search(pattern_template.format(obj=obj, elements=el), x) for el in elements_list)
+                )
+                strat_df_obj = strat_df[pattern_mask].copy()
+                if strat_df_obj.empty:
+                    continue
+
+                strat_df_obj_sorted = strat_df_obj.sort_values(by=["normalized_hv", self.time], ascending=[False, True])
+                normalized_hvs = strat_df_obj_sorted["normalized_hv"].tolist()
+
+                if obj not in data["objectives"]:
+                    data["objectives"][obj] = {}
+                data["objectives"][obj][strategy] = {
+                    "hv": normalized_hvs
+                }
+
+        return data
+        strategies = self.fixed_strategies
+        if data is None:
+            data = self.get_contribution_to_joint_front_data(df, problem_name, objs_elements, pattern_template)
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title(f"{problem_name} - Contribution to Joint Pareto Front", fontsize=16)
+
+        for i, strategy in enumerate(strategies):
+            contrib = data["global"].get(strategy, [])
+            if not contrib:
+                continue
+            x = list(range(1, len(contrib) + 1))
+            ax.plot(x, contrib,
+                    label=strategy,
+                    color=self.strategy_colors[strategy],
+                    marker=self.strategy_markers[strategy],
+                    linestyle='-',
+                    markersize=6,
+                    markerfacecolor='none',
+                    linewidth=1.5)
+
+        ax.set_xlabel("Instances (sorted by contribution)", fontsize=16)
+        ax.set_ylabel("Contribution to joint front", fontsize=14)
+        ax.set_ylim(0, 1.05)
+        ax.tick_params(axis='both', labelsize=14)
+        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        figs[f"joint_front_contribution_{problem_name}"] = fig
+        plt.show()
+
+        return figs
+
+    # -------------------------------------------------------------------------------------------------------------------
+    # ----------------- Normalized contribution per strategy -----------------------------------------------------------
+    # -------------------------------------------------------------------------------------------------------------------
+    def plot_normalized_contribution_per_strategy(self, df, problem_name, objs_elements, pattern_template, figs,
+                                                  data=None):
+        strategies = self.fixed_strategies
+        if data is None:
+            data = self.get_contribution_to_joint_front_data(df, problem_name, objs_elements, pattern_template)
+
+        for_plotting = data["objectives"]
+
+        # --------- PER OBJECTIVE ----------
+        for obj, obj_data in for_plotting.items():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.set_title(f"{problem_name} - Contribution to joint front - {obj} objectives", fontsize=16)
+
+            for i, strategy in enumerate(strategies):
+                if strategy not in obj_data:
+                    continue
+                contrib_list = obj_data[strategy]["contribution"]
+                contrib_values = [val for _, val in contrib_list]  # ignore instance names
+                x = list(range(1, len(contrib_values) + 1))
+
+                ax.plot(x, contrib_values,
+                        label=strategy,
+                        color=self.strategy_colors[strategy],
+                        marker=self.strategy_markers[strategy],
+                        linestyle='-',
+                        markersize=6,
+                        markerfacecolor='none',  # Unfilled marker
+                        linewidth=1.5)
+
+            ax.set_xlabel("Instances (sorted by contribution)", fontsize=16)
+            ax.set_ylabel("Contribution to joint front", fontsize=14)
+            ax.set_ylim(0, 1.05)
+            ax.tick_params(axis='both', labelsize=14)
+            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.tight_layout()
+            figs[f"normalized_contribution_sorted_{problem_name}_{obj}obj"] = fig
+            plt.show()
+
+        # --------- GLOBAL ----------
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title(f"{problem_name} - Contribution to joint front - All instances", fontsize=16)
+
+        for i, strategy in enumerate(strategies):
+            if strategy not in data["global"]:
+                continue
+            contrib_list = data["global"][strategy]["contribution"]
+            contrib_values = [val for _, val in contrib_list]
+            x = list(range(1, len(contrib_values) + 1))
+
+            ax.plot(x, contrib_values,
+                    label=strategy,
+                    color=self.strategy_colors[strategy],
+                    marker=self.strategy_markers[strategy],
+                    linestyle='-',
+                    markersize=6,
+                    markerfacecolor='none',
+                    linewidth=1.5)
+
+        ax.set_xlabel("Instances (sorted by contribution)", fontsize=16)
+        ax.set_ylabel("Contribution to joint front", fontsize=14)
+        ax.set_ylim(0, 1.05)
+        ax.tick_params(axis='both', labelsize=14)
+        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        figs[f"normalized_contribution_sorted_{problem_name}_all"] = fig
+        plt.show()
+
+        return figs
+
+    def get_contribution_to_joint_front_data(self, df, problem_name, objs_elements, pattern_template):
+        df_problem = df
+        strategies = df_problem[self.front_strategy].unique()
+
+        data = {
+            "objectives": {},
+            "global": {strategy: {"contribution": []} for strategy in strategies}
+        }
+
+        instances = df_problem[self.instance].unique()
+
+        # Check whether the problem is maximization or minimization
+        row = df_problem.iloc[0]
+        ref_point = row["reference_point"]
+        ref_point = ast.literal_eval(ref_point)
+        # convert from string to np array
+        pareto_front = row[self.pareto_front]  # is a string
+        pareto_front = ast.literal_eval(pareto_front)
+        maximize = is_maximization_problem(pareto_front, ref_point)
+
+        for strategy in strategies:
+            strat_df = df_problem[df_problem[self.front_strategy] == strategy].copy()
+            if strat_df.empty:
+                continue
+
+            for instance in instances:
+                df_instance = df_problem[df_problem[self.instance] == instance]
+                fronts_by_strategy = {}
+                true_front = None
+
+                for _, row in df_instance.iterrows():
+                    strat = row[self.front_strategy]
+                    if pd.isna(row[self.pareto_front]):
+                        continue
+
+                    front_points = ast.literal_eval(row[self.pareto_front])
+                    fronts_by_strategy.setdefault(strat, []).extend(front_points)
+                    if row.get(self.exhaustive, False):
+                        true_front = front_points
+
+                if true_front:
+                    joint_front = true_front
+                else:
+                    all_points = set()
+                    for points in fronts_by_strategy.values():
+                        for pt in points:
+                            all_points.add(tuple(pt))  # convert lists to tuples to make them hashable
+                    joint_front = MoAnalysis.remove_dominated_points(list(all_points), maximize)
+
+                joint_front_set = {tuple(pt) for pt in joint_front}
+                strat_points = [tuple(p) for p in fronts_by_strategy.get(strategy, [])]
+                contribution_count = sum(1 for pt in strat_points if pt in joint_front_set)
+                total_joint = len(joint_front_set)
+
+                contribution_ratio = (
+                    contribution_count / total_joint if total_joint > 0 else 0
+                )
+                data["global"][strategy]["contribution"].append((instance, contribution_ratio))
+
+                # --------- Per Objective (pattern match) ---------
+                for obj, elements_list in objs_elements.items():
+                    if not any(
+                            re.search(pattern_template.format(obj=obj, elements=el), instance) for el in elements_list):
+                        continue
+
+                    if obj not in data["objectives"]:
+                        data["objectives"][obj] = {s: {"contribution": []} for s in strategies}
+
+                    data["objectives"][obj][strategy]["contribution"].append((instance, contribution_ratio))
+
+        # Sort contributions by value (descending)
+        for strategy in data["global"]:
+            data["global"][strategy]["contribution"].sort(key=lambda x: x[1], reverse=True)
+
+        for obj in data["objectives"]:
+            for strategy in data["objectives"][obj]:
+                data["objectives"][obj][strategy]["contribution"].sort(key=lambda x: x[1], reverse=True)
+
+        return data
+
+    # ------------------------------ End of paper plotting functions ---------------------------------------------------
+
     def set_stats_exhaustive(self, stats_exhaustive, pretty_name):
         self.stats_exhaustive = stats_exhaustive
         self.stats_exhaustive_pretty_name = pretty_name
@@ -2607,19 +2923,20 @@ class MoAnalysis:
 
 class SaveAllResultsCP2025:
 
-    folder_path = "cp2025"
+    # folder_path = "cp2025"
 
-    def __init__(self, csv_paths_problem, with_evolution=False):
+    def __init__(self, csv_paths_problem, config=None):
         self.csv_paths_problem = csv_paths_problem  # expecting list of (csv_path, problem_name) tuples
         # Ex: csvs = [("rcpsp.csv", "rcpsp"), ("ukp.csv", "ukp")]
         # runner = SaveAllResultsCP2025(csvs)
         self.analysis = MoAnalysis()
-        self.with_evolution = with_evolution
-
+        if config is None:
+            raise ValueError("Config is required")
+        self.config = config
 
     def save_all_results(self):
         print("Starting to save all results. Here we go!")
-        print(f"With evolution: {self.with_evolution}")
+        print(f"With evolution: {self.config.print_hv_evolution}")
         for csv_path, problem in self.csv_paths_problem:
             self.save_results(csv_path, problem)
 
@@ -2629,27 +2946,30 @@ class SaveAllResultsCP2025:
 
         figs = {}
         latex_text = ""
-        if self.with_evolution:
+        if self.config.print_hv_evolution:
             df = self.add_hv_computed_evolution_if_not_present(df, csv_path)
         df = self.beautify_strategies_names(df)
         print("Safety checks")
-        # if "sims" in problem:
-        #     df = self.rename_sims_strategies_to_indicate_objectives(df)
+        if "sims" in problem:
+            df = self.rename_sims_strategies_to_indicate_objectives(df)
 
-        if not self.safety_checks_exhaustive(df):
-            print(f"Safety checks for exhaustive conditions has failed for {csv_path}")
-            return
-        if not self.safety_check_fronts(df):
-            print(f"Safety checks for fronts has failed for {csv_path}")
-            return
+        if self.config.do_safety_checks:
+            if not self.safety_checks_exhaustive(df):
+                print(f"Safety checks for exhaustive conditions has failed for {csv_path}")
+                return
+            if not self.safety_check_fronts(df):
+                print(f"Safety checks for fronts has failed for {csv_path}")
+                return
+            print("Safety checks passed")
+        else:
+            print(f"⚠️ Unless you are sure, it is recommended to enable safety checks")
 
-        print("Safety checks passed")
         print("Creating pretty tables")
-        self.save_latex_table_text(df, problem)
-        print("Creating pretty tables done")
-        print("Creating plots")
+        if self.config.print_latex_table:
+            self.save_latex_table_text(df, problem)
+            print("Creating pretty tables done")
+
         self.save_all_figs(df, problem)
-        print("Creating plots done")
         print("Finished processing")
 
     def add_hv_computed_evolution_if_not_present(self, df, csv_file_path):
@@ -2719,7 +3039,8 @@ class SaveAllResultsCP2025:
             print("The strategies that are exhaustive produce the same hypervolume")
 
         # 🔹 Count groups where NOT all rows have exhaustive = True
-        count_not_all_exhaustive = df.groupby(self.analysis.instance)[self.analysis.exhaustive].apply(lambda x: not x.all()).sum()
+        count_not_all_exhaustive = df.groupby(self.analysis.instance)[self.analysis.exhaustive].apply(
+            lambda x: not x.all()).sum()
 
         total_groups = df[self.analysis.instance].nunique()
 
@@ -2746,7 +3067,7 @@ class SaveAllResultsCP2025:
                 pareto_front_points = ast.literal_eval(pareto_front_points)
 
             dominated_points = MoAnalysis.check_points_in_front_are_not_dominated(pareto_front_points,
-                                                                                maximization_problems)
+                                                                                  maximization_problems)
             if len(dominated_points) > 0:
                 # Create a new row
                 new_row = pd.DataFrame([{
@@ -2800,16 +3121,18 @@ class SaveAllResultsCP2025:
             if table_results[0] is not None:
                 non_stats_headers = ["K", "n", "instances", "p"]
                 table_exhaustive_latex = self.analysis.disjunctive_paper_style_dataframe_to_latex(table_results[0],
-                                                                                             non_stats_headers, True,
-                                                                                             title_exhaustive)
+                                                                                                  non_stats_headers,
+                                                                                                  True,
+                                                                                                  title_exhaustive)
                 print(table_exhaustive_latex)
                 text_to_save += "\n\n"
                 text_to_save += table_exhaustive_latex
         if table_results[1] is not None:
             non_stats_headers = ["K", "n", "instances"]
             table_non_exhaustive_latex = self.analysis.disjunctive_paper_style_dataframe_to_latex(table_results[1],
-                                                                                             non_stats_headers, False,
-                                                                                             title_non_exhaustive)
+                                                                                                  non_stats_headers,
+                                                                                                  False,
+                                                                                                  title_non_exhaustive)
             print("---------------Comparison strategies when not all exhaustive----------------------")
             print(table_non_exhaustive_latex)
             text_to_save += "\n\n"
@@ -2823,6 +3146,7 @@ class SaveAllResultsCP2025:
         print(f"Saved table results to '{text_file_path}'")
 
     def save_all_figs(self, df, problem):
+        print("Creating plots")
         if problem == "ukp":
             objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
         elif problem == "nqueens":
@@ -2832,26 +3156,98 @@ class SaveAllResultsCP2025:
         elif problem == "sims":
             # todo deal with sims correctly
             objs_elements, pattern_template = get_info_similar_instances_sims()
+        else:
+            raise ValueError("The problem is not recognized")
 
         figs = {}
-        figs = self.analysis.plot_time_vs_completed_instances_for_problem(df, problem, objs_elements, pattern_template, figs)
-        if self.with_evolution:
-            figs = self.analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template, figs, plot_variance=False)
-        data = self.analysis.get_cumulative_hv_vs_time_data(df, problem, objs_elements, pattern_template)
-        figs = self.analysis.plot_cumulative_hv_vs_time(data, problem, figs)
-        figs = self.analysis.plot_best_hypervolume_histogram(df, problem, objs_elements, pattern_template, figs)
+        if self.config.print_time_vs_instances:
+            figs = self.analysis.plot_time_vs_completed_instances_for_problem(df, problem, objs_elements,
+                                                                              pattern_template, figs)
+        if self.config.print_hv_evolution:
+            figs = self.analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template,
+                                                                       figs, plot_variance=False)
+        if self.config.print_cumulative_hv:
+            data = self.analysis.get_cumulative_hv_vs_time_data(df, problem, objs_elements, pattern_template)
+            figs = self.analysis.plot_cumulative_hv_vs_time(data, problem, figs)
+        if self.config.print_hv_histogram:
+            figs = self.analysis.plot_best_hypervolume_histogram(df, problem, objs_elements, pattern_template, figs)
+        if self.config.print_sorted_normalized_hv_per_strategy:
+            figs = self.analysis.plot_sorted_normalized_hv_per_strategy(df, problem, objs_elements, pattern_template,
+                                                                        figs)
+        if self.config.print_sorted_contribution_per_strategy:
+            figs = self.analysis.plot_sorted_contribution_per_strategy(df, problem, objs_elements, pattern_template,
+                                                                       figs)
 
-        import os
-        import matplotlib.pyplot as plt
+        if figs:
+            import os
+            import matplotlib.pyplot as plt
 
-        output_dir = os.path.join(self.folder_path, problem)
-        os.makedirs(output_dir, exist_ok=True)
+            output_dir = os.path.join(self.config.folder_path, problem)
+            os.makedirs(output_dir, exist_ok=True)
 
-        for name, fig in figs.items():
-            fig_path = os.path.join(output_dir, f"{name}.pdf")
-            fig.savefig(fig_path, format='pdf', bbox_inches='tight')
-            plt.close(fig)  # optional: frees memory if you're done
-        print(f"Saved {len(figs)} figures to '{output_dir}'")
+            for name, fig in figs.items():
+                fig_path = os.path.join(output_dir, f"{name}.pdf")
+                fig.savefig(fig_path, format='pdf', bbox_inches='tight')
+                plt.close(fig)  # optional: frees memory if you're done
+            print(f"Saved {len(figs)} figures to '{output_dir}'")
+        print("Creating plots done")
+
+
+class FiguresTablesToPrint:
+    def __init__(
+            self,
+            do_safety_checks=True,
+            print_time_vs_instances=True,
+            print_cumulative_hv=True,
+            print_hv_histogram=True,
+            print_latex_tables=True,
+            print_sorted_normalized_hv_per_strategy=True,
+            print_sorted_contribution_per_strategy=True,
+            folder_path="cp2025",
+            print_hv_evolution=False
+    ):
+        self.do_safety_checks = do_safety_checks
+        self.print_time_vs_instances = print_time_vs_instances
+        self.print_cumulative_hv = print_cumulative_hv
+        self.print_hv_histogram = print_hv_histogram
+        self.print_latex_tables = print_latex_tables
+        self.print_sorted_normalized_hv_per_strategy = print_sorted_normalized_hv_per_strategy
+        self.print_sorted_contribution_per_strategy = print_sorted_contribution_per_strategy
+        self.folder_path = folder_path
+        self.print_hv_evolution = print_hv_evolution
+        self.print_config_lines()
+
+    def __repr__(self):
+        return (f"FiguresTablesToPrint("
+                f"do_safety_checks={self.do_safety_checks}, "
+                f"time_vs_instances={self.print_time_vs_instances}, "
+                f"hv_evolution={self.print_hv_evolution}, "
+                f"cumulative_hv={self.print_cumulative_hv}, "
+                f"hv_histogram={self.print_hv_histogram}, "
+                f"latex_tables={self.print_latex_tables}),"
+                f"sorted_normalized_hv_per_strategy={self.print_sorted_normalized_hv_per_strategy},"
+                f"sorted_contribution_hv_per_strategy={self.print_sorted_contribution_per_strategy}")
+
+    def print_config_lines(self):
+        def symbol(value, is_safety=False):
+            if value:
+                return "✅"
+            else:
+                return "⚠️" if is_safety else "❌"
+
+        print("\n🛠️ Configuration for printing figures and tables:")
+        print(f"{symbol(self.do_safety_checks, is_safety=True)} Do safety checks: {self.do_safety_checks}")
+        print(f"{symbol(self.print_time_vs_instances)} Print time vs instances: {self.print_time_vs_instances}")
+        print(f"{symbol(self.print_hv_evolution)} Print HV evolution: {self.print_hv_evolution}")
+        print(f"{symbol(self.print_cumulative_hv)} Print cumulative HV: {self.print_cumulative_hv}")
+        print(f"{symbol(self.print_hv_histogram)} Print HV histogram: {self.print_hv_histogram}")
+        print(f"{symbol(self.print_latex_tables)} Print LaTeX tables: {self.print_latex_tables}")
+        print(
+            f"{symbol(self.print_sorted_normalized_hv_per_strategy)} Print sorted normalized HV per strategy: {self.print_sorted_normalized_hv_per_strategy}")
+        print(
+            f"{symbol(self.print_sorted_contribution_per_strategy)} Print sorted contribution HV per strategy: {self.print_sorted_contribution_per_strategy}")
+        print(f"Folder path: {self.folder_path}")
+        print("")  # Just a clean newline
 
 
 class Cols:
@@ -2887,11 +3283,32 @@ if __name__ == '__main__':
     figs_fronts = {}
 
     # todo for test copy code here for quick test
-    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/saug_gava_disjunctive_gias/mo_saug_gava_disjunctive_gias_solutions_and_stats.csv"
+    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/sims/fix_saug_10800_timeout/mo_fix_saug_10800_timeout_solutions_and_stats.csv"
 
-    problem = "rcpsp"  # ukp, nqueens, rcpsp, sims_cost_clouds, automotive, flowshop_permutation
+    problem = "sims"  # ukp, nqueens, rcpsp, sims_cost_clouds, automotive, flowshop_permutation
 
     df = analysis.csv_to_df(csv_file_path)
+
+    df.front_generator = df.front_generator.str.replace("GIA_boundedLazy", "GIAubL")
+    df.front_generator = df.front_generator.str.replace("GIA_bounded", "GIAub")
+    df.front_generator = df.front_generator.str.replace("ParetoGavanelliGlobalConstraint", "Gavanelli")
+    df.front_generator = df.front_generator.str.replace("ParetoDisjunctiveProgramming", "DisjProg")
+
+    if problem == "ukp":
+        objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
+    elif problem == "nqueens":
+        objs_elements, pattern_template = get_info_similar_instances_nqueens()
+    elif problem == "rcpsp":
+        objs_elements, pattern_template = get_info_similar_instances_rcpsp()
+    elif problem == "sims":
+        # todo deal with sims correctly
+        objs_elements, pattern_template = get_info_similar_instances_sims()
+        to_rename = SaveAllResultsCP2025([(csv_file_path, problem)], FiguresTablesToPrint())
+        df = to_rename.rename_sims_strategies_to_indicate_objectives(df)
+
+    data = analysis.get_contribution_to_joint_front_data(df, problem, objs_elements, pattern_template)
+    figs = {}
+    figs = analysis.plot_normalized_contribution_per_strategy(df, problem, objs_elements, pattern_template, figs, data)
 
     # Get images time vs instances solved
     if problem == "ukp":
@@ -2904,6 +3321,9 @@ if __name__ == '__main__':
         # todo deal with sims correctly
         objs_elements, pattern_template = get_info_similar_instances_sims()
 
-    figsHVTime = {}
-    figsHVTime = analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template, figsHVTime,
-                                                                plot_variance=True)
+    data = analysis.get_contribution_to_joint_front_data(df, problem, objs_elements, pattern_template)
+    checkdara = True
+
+    # figsHVTime = {}
+    # figsHVTime = analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template, figsHVTime,
+    #                                                             plot_variance=True)
