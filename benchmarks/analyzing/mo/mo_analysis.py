@@ -12,6 +12,7 @@ from IPython.display import display
 import os
 from scipy.stats import ttest_rel, wilcoxon
 from pymoo.indicators.hv import Hypervolume
+from pymoo.indicators.igd import IGD
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 
 
@@ -136,6 +137,22 @@ def compute_hv(front, reference_point, double_check_non_dominance=True):
     return Hypervolume(ref_point=reference_point)(front)
 
 
+def compute_igd(front, reference_point, pareto_front, maximize=None):
+    if len(front) == 0 or len(pareto_front) == 0:
+        return float('inf')
+    reference_point = np.array(reference_point)
+    front = np.array(front)
+    pareto_front = np.array(pareto_front)
+
+    if maximize is True or (maximize is None and is_maximization_problem(front, reference_point)):
+        # convert maximization to minimization to calculate the Hypervolume using the pymoo library
+        front = -front
+        pareto_front = -pareto_front
+
+    ind = IGD(pareto_front)
+    return ind(front)
+
+
 def is_maximization_problem(front, reference_point):
     # check if the front is np array
     if not isinstance(front, np.ndarray):
@@ -183,6 +200,9 @@ class MoAnalysis:
 
         self.stats_non_exhaustive = ["hypervolume", "front_cardinality", "exhaustive"]
         self.stats_non_exhaustive_pretty_name = ["Hyp", "Points", "Compl"]
+
+        # to store the front for each solver
+        self._joint_front_cache = {}
 
         if time_solver_sec is None:
             self.time_solver_sec = time
@@ -2716,37 +2736,6 @@ class MoAnalysis:
                 }
 
         return data
-        strategies = self.fixed_strategies
-        if data is None:
-            data = self.get_contribution_to_joint_front_data(df, problem_name, objs_elements, pattern_template)
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.set_title(f"{problem_name} - Contribution to Joint Pareto Front", fontsize=16)
-
-        for i, strategy in enumerate(strategies):
-            contrib = data["global"].get(strategy, [])
-            if not contrib:
-                continue
-            x = list(range(1, len(contrib) + 1))
-            ax.plot(x, contrib,
-                    label=strategy,
-                    color=self.strategy_colors[strategy],
-                    marker=self.strategy_markers[strategy],
-                    linestyle='-',
-                    markersize=6,
-                    markerfacecolor='none',
-                    linewidth=1.5)
-
-        ax.set_xlabel("Instances (sorted by contribution)", fontsize=16)
-        ax.set_ylabel("Contribution to joint front", fontsize=14)
-        ax.set_ylim(0, 1.05)
-        ax.tick_params(axis='both', labelsize=14)
-        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
-        figs[f"joint_front_contribution_{problem_name}"] = fig
-        plt.show()
-
-        return figs
 
     # -------------------------------------------------------------------------------------------------------------------
     # ----------------- Normalized contribution per strategy -----------------------------------------------------------
@@ -2863,11 +2852,17 @@ class MoAnalysis:
                 if true_front:
                     joint_front = true_front
                 else:
-                    all_points = set()
-                    for points in fronts_by_strategy.values():
-                        for pt in points:
-                            all_points.add(tuple(pt))  # convert lists to tuples to make them hashable
-                    joint_front = MoAnalysis.remove_dominated_points(list(all_points), maximize)
+                    cache_key = (problem_name, instance)
+                    if cache_key not in self._joint_front_cache:
+                        all_points = set()
+                        for points in fronts_by_strategy.values():
+                            for pt in points:
+                                all_points.add(tuple(pt))  # convert lists to tuples to make them hashable
+                        joint_front = MoAnalysis.remove_dominated_points(list(all_points), maximize)
+                        # cache the joint front
+                        self._joint_front_cache[cache_key] = joint_front
+                    else:
+                        joint_front = self._joint_front_cache[cache_key]
 
                 joint_front_set = {tuple(pt) for pt in joint_front}
                 strat_points = [tuple(p) for p in fronts_by_strategy.get(strategy, [])]
@@ -2897,6 +2892,157 @@ class MoAnalysis:
         for obj in data["objectives"]:
             for strategy in data["objectives"][obj]:
                 data["objectives"][obj][strategy]["contribution"].sort(key=lambda x: x[1], reverse=True)
+
+        return data
+
+    # -------------------------------------------------------------------------------------------------------------------
+    # ----------------- IGD data----------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------------------------------------------------
+    def plot_igd_per_strategy(self, df, problem_name, objs_elements, pattern_template, figs, data=None):
+        strategies = self.fixed_strategies
+        if data is None:
+            data = self.compute_igd_per_strategy(df, problem_name, objs_elements, pattern_template)
+
+        for_plotting = data["objectives"]
+
+        # --------- PER OBJECTIVE ----------
+        for obj, obj_data in for_plotting.items():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.set_title(f"{problem_name} - IGD per instance - {obj} objectives", fontsize=16)
+
+            for i, strategy in enumerate(strategies):
+                if strategy not in obj_data:
+                    continue
+                igd_sorted = obj_data[strategy]["igd"]
+                igd_values = [val for (_, val) in igd_sorted]
+                x = list(range(1, len(igd_values) + 1))
+
+                ax.plot(x, igd_values,
+                        label=strategy,
+                        color=self.strategy_colors[strategy],
+                        marker=self.strategy_markers[strategy],
+                        linestyle='-',
+                        markersize=6,
+                        markerfacecolor='none',
+                        linewidth=1.5)
+
+            ax.set_xlabel("Instances (sorted by IGD)", fontsize=16)
+            ax.set_ylabel("IGD", fontsize=14)
+            ax.tick_params(axis='both', labelsize=14)
+            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.tight_layout()
+            figs[f"igd_sorted_per_instance_{problem_name}_{obj}obj"] = fig
+            plt.show()
+
+        # --------- GLOBAL ----------
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title(f"{problem_name} - IGD per instance - All instances", fontsize=16)
+
+        for i, strategy in enumerate(strategies):
+            if strategy not in data["global"]:
+                continue
+            igd_sorted = data["global"][strategy]["igd"]
+            igd_values = [val for (_, val) in igd_sorted]
+            x = list(range(1, len(igd_values) + 1))
+
+            ax.plot(x, igd_values,
+                    label=strategy,
+                    color=self.strategy_colors[strategy],
+                    marker=self.strategy_markers[strategy],
+                    linestyle='-',
+                    markersize=6,
+                    markerfacecolor='none',
+                    linewidth=1.5)
+
+        ax.set_xlabel("Instances (sorted by IGD)", fontsize=16)
+        ax.set_ylabel("IGD", fontsize=14)
+        ax.tick_params(axis='both', labelsize=14)
+        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        figs[f"igd_sorted_per_instance_{problem_name}_all"] = fig
+        plt.show()
+
+        return figs
+
+    def compute_igd_per_strategy(self, df, problem_name, objs_elements, pattern_template):
+        df_problem = df
+        strategies = df_problem[self.front_strategy].unique()
+
+        data = {
+            "objectives": {},
+            "global": {strategy: {"igd": []} for strategy in strategies}
+        }
+
+        instances = df_problem[self.instance].unique()
+
+        # Check whether the problem is maximization or minimization
+        row = df_problem.iloc[0]
+        ref_point = row["reference_point"]
+        ref_point = ast.literal_eval(ref_point)
+        # convert from string to np array
+        pareto_front = row[self.pareto_front]  # is a string
+        pareto_front = ast.literal_eval(pareto_front)
+        maximize = is_maximization_problem(pareto_front, ref_point)
+
+        for strategy in strategies:
+            strat_df = df_problem[df_problem[self.front_strategy] == strategy].copy()
+            if strat_df.empty:
+                continue
+
+            for instance in instances:
+                df_instance = df_problem[df_problem[self.instance] == instance]
+                fronts_by_strategy = {}
+                true_front = None
+
+                for _, row in df_instance.iterrows():
+                    strat = row[self.front_strategy]
+                    if pd.isna(row[self.pareto_front]):
+                        continue
+
+                    front_points = ast.literal_eval(row[self.pareto_front])
+                    fronts_by_strategy.setdefault(strat, []).extend(front_points)
+                    if row.get(self.exhaustive, False):
+                        true_front = front_points
+
+                if true_front:
+                    joint_front = true_front
+                else:
+                    cache_key = (problem_name, instance)
+                    if cache_key not in self._joint_front_cache:
+                        all_points = set()
+                        for points in fronts_by_strategy.values():
+                            for pt in points:
+                                all_points.add(tuple(pt))  # convert lists to tuples to make them hashable
+                        joint_front = MoAnalysis.remove_dominated_points(list(all_points), maximize)
+                        # cache the joint front
+                        self._joint_front_cache[cache_key] = joint_front
+                    else:
+                        joint_front = self._joint_front_cache[cache_key]
+
+                # get the igd
+                strat_instance_igd = compute_igd(fronts_by_strategy.get(strategy, []), ref_point,
+                                                                joint_front, maximize)
+
+                data["global"][strategy]["igd"].append((instance, strat_instance_igd))
+
+                # --------- Per Objective (pattern match) ---------
+                for obj, elements_list in objs_elements.items():
+                    if not any(
+                            re.search(pattern_template.format(obj=obj, elements=el), instance) for el in elements_list):
+                        continue
+
+                    if obj not in data["objectives"]:
+                        data["objectives"][obj] = {s: {"igd": []} for s in strategies}
+
+                    data["objectives"][obj][strategy]["igd"].append((instance, strat_instance_igd))
+
+        # Sort contributions by value (descending)
+        for strategy in data["global"]:
+            data["global"][strategy]["igd"].sort(key=lambda x: x[1], reverse=False)
+
+        for obj in data["objectives"]:
+            for strategy in data["objectives"][obj]:
+                data["objectives"][obj][strategy]["igd"].sort(key=lambda x: x[1], reverse=False)
 
         return data
 
@@ -2937,8 +3083,10 @@ class SaveAllResultsCP2025:
     def save_all_results(self):
         print("Starting to save all results. Here we go!")
         print(f"With evolution: {self.config.print_hv_evolution}")
+        figs, data = {}, {}
         for csv_path, problem in self.csv_paths_problem:
-            self.save_results(csv_path, problem)
+            figs[problem], data[problem] = self.save_results(csv_path, problem)
+        return figs, data
 
     def save_results(self, csv_path, problem):
         df = self.analysis.csv_to_df(csv_path)
@@ -2950,7 +3098,7 @@ class SaveAllResultsCP2025:
             df = self.add_hv_computed_evolution_if_not_present(df, csv_path)
         df = self.beautify_strategies_names(df)
         print("Safety checks")
-        if "sims" in problem:
+        if "sims" in problem.lower():
             df = self.rename_sims_strategies_to_indicate_objectives(df)
 
         if self.config.do_safety_checks:
@@ -2965,12 +3113,13 @@ class SaveAllResultsCP2025:
             print(f"⚠️ Unless you are sure, it is recommended to enable safety checks")
 
         print("Creating pretty tables")
-        if self.config.print_latex_table:
+        if self.config.print_latex_tables:
             self.save_latex_table_text(df, problem)
             print("Creating pretty tables done")
 
-        self.save_all_figs(df, problem)
+        figs, data = self.save_all_figs(df, problem)
         print("Finished processing")
+        return figs, data
 
     def add_hv_computed_evolution_if_not_present(self, df, csv_file_path):
         if "hv_computed_evolution" not in df.columns:
@@ -3147,19 +3296,20 @@ class SaveAllResultsCP2025:
 
     def save_all_figs(self, df, problem):
         print("Creating plots")
-        if problem == "ukp":
+        if problem == "MUKP":
             objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
-        elif problem == "nqueens":
+        elif problem == "MN-Queens":
             objs_elements, pattern_template = get_info_similar_instances_nqueens()
-        elif problem == "rcpsp":
+        elif problem == "MRCPSP":
             objs_elements, pattern_template = get_info_similar_instances_rcpsp()
-        elif problem == "sims":
+        elif problem == "SIMS":
             # todo deal with sims correctly
             objs_elements, pattern_template = get_info_similar_instances_sims()
         else:
             raise ValueError("The problem is not recognized")
 
         figs = {}
+        data = {}
         if self.config.print_time_vs_instances:
             figs = self.analysis.plot_time_vs_completed_instances_for_problem(df, problem, objs_elements,
                                                                               pattern_template, figs)
@@ -3167,16 +3317,21 @@ class SaveAllResultsCP2025:
             figs = self.analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template,
                                                                        figs, plot_variance=False)
         if self.config.print_cumulative_hv:
-            data = self.analysis.get_cumulative_hv_vs_time_data(df, problem, objs_elements, pattern_template)
-            figs = self.analysis.plot_cumulative_hv_vs_time(data, problem, figs)
+            data['cumulative_hv_vs_time'] = self.analysis.get_cumulative_hv_vs_time_data(df, problem, objs_elements, pattern_template)
+            figs = self.analysis.plot_cumulative_hv_vs_time(data['cumulative_hv_vs_time'], problem, figs)
         if self.config.print_hv_histogram:
             figs = self.analysis.plot_best_hypervolume_histogram(df, problem, objs_elements, pattern_template, figs)
         if self.config.print_sorted_normalized_hv_per_strategy:
-            figs = self.analysis.plot_sorted_normalized_hv_per_strategy(df, problem, objs_elements, pattern_template,
-                                                                        figs)
+            data['hv_per_strategy'] = self.analysis.get_normalized_hv_per_strategy_data(df, problem, objs_elements, pattern_template)
+            figs = self.analysis.plot_normalized_hypervolume_per_strategy(df, problem, objs_elements, pattern_template,
+                                                                        figs, data['hv_per_strategy'])
         if self.config.print_sorted_contribution_per_strategy:
-            figs = self.analysis.plot_sorted_contribution_per_strategy(df, problem, objs_elements, pattern_template,
-                                                                       figs)
+            data['contribution_joint_front'] = self.analysis.get_contribution_to_joint_front_data(df, problem, objs_elements, pattern_template)
+            figs = self.analysis.plot_normalized_contribution_per_strategy(df, problem, objs_elements, pattern_template,
+                                                                       figs, data['contribution_joint_front'])
+        if self.config.print_sorted_igd_per_strategy:
+            data['igd'] = self.analysis.compute_igd_per_strategy(df, problem, objs_elements, pattern_template)
+            figs = self.analysis.plot_igd_per_strategy(df, problem, objs_elements, pattern_template, figs, data['igd'])
 
         if figs:
             import os
@@ -3191,6 +3346,7 @@ class SaveAllResultsCP2025:
                 plt.close(fig)  # optional: frees memory if you're done
             print(f"Saved {len(figs)} figures to '{output_dir}'")
         print("Creating plots done")
+        return figs, data
 
 
 class FiguresTablesToPrint:
@@ -3203,6 +3359,7 @@ class FiguresTablesToPrint:
             print_latex_tables=True,
             print_sorted_normalized_hv_per_strategy=True,
             print_sorted_contribution_per_strategy=True,
+            print_sorted_igd_per_strategy=True,
             folder_path="cp2025",
             print_hv_evolution=False
     ):
@@ -3213,6 +3370,7 @@ class FiguresTablesToPrint:
         self.print_latex_tables = print_latex_tables
         self.print_sorted_normalized_hv_per_strategy = print_sorted_normalized_hv_per_strategy
         self.print_sorted_contribution_per_strategy = print_sorted_contribution_per_strategy
+        self.print_sorted_igd_per_strategy = print_sorted_igd_per_strategy
         self.folder_path = folder_path
         self.print_hv_evolution = print_hv_evolution
         self.print_config_lines()
@@ -3226,7 +3384,8 @@ class FiguresTablesToPrint:
                 f"hv_histogram={self.print_hv_histogram}, "
                 f"latex_tables={self.print_latex_tables}),"
                 f"sorted_normalized_hv_per_strategy={self.print_sorted_normalized_hv_per_strategy},"
-                f"sorted_contribution_hv_per_strategy={self.print_sorted_contribution_per_strategy}")
+                f"sorted_contribution_hv_per_strategy={self.print_sorted_contribution_per_strategy},"
+                f"print_sorted_igd_per_strategy={self.print_sorted_igd_per_strategy}")
 
     def print_config_lines(self):
         def symbol(value, is_safety=False):
@@ -3246,6 +3405,8 @@ class FiguresTablesToPrint:
             f"{symbol(self.print_sorted_normalized_hv_per_strategy)} Print sorted normalized HV per strategy: {self.print_sorted_normalized_hv_per_strategy}")
         print(
             f"{symbol(self.print_sorted_contribution_per_strategy)} Print sorted contribution HV per strategy: {self.print_sorted_contribution_per_strategy}")
+        print(
+            f"{symbol(self.print_sorted_igd_per_strategy)} Print sorted IGD per strategy: {self.print_sorted_igd_per_strategy}")
         print(f"Folder path: {self.folder_path}")
         print("")  # Just a clean newline
 
@@ -3306,23 +3467,9 @@ if __name__ == '__main__':
         to_rename = SaveAllResultsCP2025([(csv_file_path, problem)], FiguresTablesToPrint())
         df = to_rename.rename_sims_strategies_to_indicate_objectives(df)
 
-    data = analysis.get_contribution_to_joint_front_data(df, problem, objs_elements, pattern_template)
+    data = analysis.compute_igd_per_strategy(df, problem, objs_elements, pattern_template)
     figs = {}
     figs = analysis.plot_normalized_contribution_per_strategy(df, problem, objs_elements, pattern_template, figs, data)
-
-    # Get images time vs instances solved
-    if problem == "ukp":
-        objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
-    elif problem == "nqueens":
-        objs_elements, pattern_template = get_info_similar_instances_nqueens()
-    elif problem == "rcpsp":
-        objs_elements, pattern_template = get_info_similar_instances_rcpsp()
-    elif problem == "sims_cost_clouds":
-        # todo deal with sims correctly
-        objs_elements, pattern_template = get_info_similar_instances_sims()
-
-    data = analysis.get_contribution_to_joint_front_data(df, problem, objs_elements, pattern_template)
-    checkdara = True
 
     # figsHVTime = {}
     # figsHVTime = analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template, figsHVTime,
