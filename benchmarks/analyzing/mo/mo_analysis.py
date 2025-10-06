@@ -13,6 +13,7 @@ import os
 from scipy.stats import ttest_rel, wilcoxon
 from pymoo.indicators.hv import Hypervolume
 from pymoo.indicators.igd import IGD
+from pymoo.indicators.igd_plus import IGDPlus
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 
 
@@ -137,7 +138,7 @@ def compute_hv(front, reference_point, double_check_non_dominance=True):
     return Hypervolume(ref_point=reference_point)(front)
 
 
-def compute_igd(front, reference_point, pareto_front, maximize=None):
+def compute_igd(front, reference_point, pareto_front, maximize=None, plus=False):
     if len(front) == 0 or len(pareto_front) == 0:
         return float('inf')
     reference_point = np.array(reference_point)
@@ -148,8 +149,10 @@ def compute_igd(front, reference_point, pareto_front, maximize=None):
         # convert maximization to minimization to calculate the Hypervolume using the pymoo library
         front = -front
         pareto_front = -pareto_front
-
-    ind = IGD(pareto_front)
+    if plus:
+        ind = IGDPlus(pareto_front)
+    else:
+        ind = IGD(pareto_front)
     return ind(front)
 
 
@@ -171,6 +174,27 @@ def is_maximization_problem(front, reference_point):
         comparisson_array = reference_point_np < front_np[0]
 
     return comparisson_array[0]
+
+
+def set_general_plot_style():
+    import matplotlib as mpl
+
+    mpl.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.size": 18,
+        "axes.labelsize": 18,
+        "axes.titlesize": 20,
+        "xtick.labelsize": 16,
+        "ytick.labelsize": 16,
+        "legend.fontsize": 24,
+        "lines.markersize": 8,
+        # "lines.linewidth": 1.8,
+        # Grid style (but must be enabled manually)
+        "grid.linestyle": "--",
+        "grid.linewidth": 0.5,
+        "grid.alpha": 0.7,
+    })
 
 
 class MoAnalysis:
@@ -231,7 +255,7 @@ class MoAnalysis:
     @staticmethod
     def count_common_digits(values):
         """Finds how many leading digits are the same in all values (excluding exponent)."""
-        values = sorted(abs(v) for v in values if v >= 10 ** 4)  # Ignore small numbers
+        values = sorted(set(abs(v) for v in values if v >= 10 ** 4))  # Ignore small numbers
         if len(values) < 2:
             return 0  # No comparison possible with one or no values
 
@@ -240,7 +264,8 @@ class MoAnalysis:
 
         common_digits = 0
         for i in range(min_len):
-            if all(s[i] == str_values[0][i] for s in str_values[1:]):
+            chars_at_pos = set(s[i] for s in str_values)
+            if len(chars_at_pos) < len(str_values):  # Some agreement
                 common_digits += 1
             else:
                 break
@@ -298,7 +323,7 @@ class MoAnalysis:
                 # Get values for this stat if available, otherwise use just the current number
                 column_values = numeric_values[stats_columns[col[1]]] if col[1] in stats_columns else [num_value]
                 formatted_value = (
-                    f"${MoAnalysis.format_number_dynamic(num_value, column_values, base_precision=6, min_precision=2)}$"
+                    f"${MoAnalysis.format_number_dynamic(num_value, column_values, base_precision=8, min_precision=2)}$"
                 )
                 # Apply bold if this value is the lowest for its stat
                 stat_name = col[1]
@@ -1316,7 +1341,7 @@ class MoAnalysis:
             problem_for_instance = problem_for_instance_list[0]
             name_plot = f"{problem_for_instance}-{instance_to_process}"
 
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=(10, 6))
 
             for _, row in filtered_df.iterrows():
                 solver_strategy = row['solver_strategy']
@@ -1343,6 +1368,7 @@ class MoAnalysis:
             ax.set_ylabel('Objective 2')
             ax.set_title(f'Pareto fronts for instance {name_plot}')
             ax.legend(title='Solver strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
             plt.show()
             fig_key = f"{generic_key}_{name_plot}"
             figs[fig_key] = fig
@@ -3046,6 +3072,158 @@ class MoAnalysis:
 
         return data
 
+    # -------------------------------------------------------------------------------------------------------------------
+    # ----------------- IGD+ data----------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------------------------------------------------
+
+    def plot_igd_plus_per_strategy(self, df, problem_name, objs_elements, pattern_template, figs, data=None):
+        strategies = self.fixed_strategies
+        if data is None:
+            data = self.compute_igd_per_strategy(df, problem_name, objs_elements, pattern_template)
+
+        for_plotting = data["objectives"]
+
+        # --------- PER OBJECTIVE ----------
+        for obj, obj_data in for_plotting.items():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.set_title(f"{problem_name} - IGD+ per instance - {obj} objectives", fontsize=16)
+
+            for i, strategy in enumerate(strategies):
+                if strategy not in obj_data:
+                    continue
+                igd_sorted = obj_data[strategy]["igd_plus"]
+                igd_values = [val for (_, val) in igd_sorted]
+                x = list(range(1, len(igd_values) + 1))
+
+                ax.plot(x, igd_values,
+                        label=strategy,
+                        color=self.strategy_colors[strategy],
+                        marker=self.strategy_markers[strategy],
+                        linestyle='-',
+                        markersize=6,
+                        markerfacecolor='none',
+                        linewidth=1.5)
+
+            ax.set_xlabel("Instances (sorted by IGD+)", fontsize=16)
+            ax.set_ylabel("IGD+", fontsize=14)
+            ax.tick_params(axis='both', labelsize=14)
+            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.tight_layout()
+            figs[f"igd_plus_sorted_per_instance_{problem_name}_{obj}obj"] = fig
+            plt.show()
+
+        # --------- GLOBAL ----------
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title(f"{problem_name} - IGD+ per instance - All instances", fontsize=16)
+
+        for i, strategy in enumerate(strategies):
+            if strategy not in data["global"]:
+                continue
+            igd_sorted = data["global"][strategy]["igd_plus"]
+            igd_values = [val for (_, val) in igd_sorted]
+            x = list(range(1, len(igd_values) + 1))
+
+            ax.plot(x, igd_values,
+                    label=strategy,
+                    color=self.strategy_colors[strategy],
+                    marker=self.strategy_markers[strategy],
+                    linestyle='-',
+                    markersize=6,
+                    markerfacecolor='none',
+                    linewidth=1.5)
+
+        ax.set_xlabel("Instances (sorted by IGD+)", fontsize=16)
+        ax.set_ylabel("IGD+", fontsize=14)
+        ax.tick_params(axis='both', labelsize=14)
+        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        figs[f"igd_plus_sorted_per_instance_{problem_name}_all"] = fig
+        plt.show()
+
+        return figs
+
+    def compute_igd_plus_per_strategy(self, df, problem_name, objs_elements, pattern_template):
+        df_problem = df
+        strategies = df_problem[self.front_strategy].unique()
+
+        data = {
+            "objectives": {},
+            "global": {strategy: {"igd_plus": []} for strategy in strategies}
+        }
+
+        instances = df_problem[self.instance].unique()
+
+        # Check whether the problem is maximization or minimization
+        row = df_problem.iloc[0]
+        ref_point = row["reference_point"]
+        ref_point = ast.literal_eval(ref_point)
+        # convert from string to np array
+        pareto_front = row[self.pareto_front]  # is a string
+        pareto_front = ast.literal_eval(pareto_front)
+        maximize = is_maximization_problem(pareto_front, ref_point)
+
+        for strategy in strategies:
+            strat_df = df_problem[df_problem[self.front_strategy] == strategy].copy()
+            if strat_df.empty:
+                continue
+
+            for instance in instances:
+                df_instance = df_problem[df_problem[self.instance] == instance]
+                fronts_by_strategy = {}
+                true_front = None
+
+                for _, row in df_instance.iterrows():
+                    strat = row[self.front_strategy]
+                    if pd.isna(row[self.pareto_front]):
+                        continue
+
+                    front_points = ast.literal_eval(row[self.pareto_front])
+                    fronts_by_strategy.setdefault(strat, []).extend(front_points)
+                    if row.get(self.exhaustive, False):
+                        true_front = front_points
+
+                if true_front:
+                    joint_front = true_front
+                else:
+                    cache_key = (problem_name, instance)
+                    if cache_key not in self._joint_front_cache:
+                        all_points = set()
+                        for points in fronts_by_strategy.values():
+                            for pt in points:
+                                all_points.add(tuple(pt))  # convert lists to tuples to make them hashable
+                        joint_front = MoAnalysis.remove_dominated_points(list(all_points), maximize)
+                        # cache the joint front
+                        self._joint_front_cache[cache_key] = joint_front
+                    else:
+                        joint_front = self._joint_front_cache[cache_key]
+
+                # get the igd
+                strat_instance_igd = compute_igd(fronts_by_strategy.get(strategy, []), ref_point,
+                                                 joint_front, maximize, plus=True)
+
+                data["global"][strategy]["igd_plus"].append((instance, strat_instance_igd))
+
+                # --------- Per Objective (pattern match) ---------
+                for obj, elements_list in objs_elements.items():
+                    if not any(
+                            re.search(pattern_template.format(obj=obj, elements=el), instance) for el in elements_list):
+                        continue
+
+                    if obj not in data["objectives"]:
+                        data["objectives"][obj] = {s: {"igd_plus": []} for s in strategies}
+
+                    data["objectives"][obj][strategy]["igd_plus"].append((instance, strat_instance_igd))
+
+        # Sort contributions by value (descending)
+        for strategy in data["global"]:
+            data["global"][strategy]["igd_plus"].sort(key=lambda x: x[1], reverse=False)
+
+        for obj in data["objectives"]:
+            for strategy in data["objectives"][obj]:
+                data["objectives"][obj][strategy]["igd_plus"].sort(key=lambda x: x[1], reverse=False)
+
+        return data
+
     # ------------------------------ End of paper plotting functions ---------------------------------------------------
 
     def set_stats_exhaustive(self, stats_exhaustive, pretty_name):
@@ -3296,11 +3474,12 @@ class SaveAllResultsCP2025:
 
     def save_all_figs(self, df, problem):
         print("Creating plots")
+        set_general_plot_style()
         if problem == "MUKP":
             objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
         elif problem == "MN-Queens":
             objs_elements, pattern_template = get_info_similar_instances_nqueens()
-        elif problem == "MRCPSP":
+        elif problem == "MORCPSP":
             objs_elements, pattern_template = get_info_similar_instances_rcpsp()
         elif problem == "SIMS":
             # todo deal with sims correctly
@@ -3332,6 +3511,9 @@ class SaveAllResultsCP2025:
         if self.config.print_sorted_igd_per_strategy:
             data['igd'] = self.analysis.compute_igd_per_strategy(df, problem, objs_elements, pattern_template)
             figs = self.analysis.plot_igd_per_strategy(df, problem, objs_elements, pattern_template, figs, data['igd'])
+        if self.config.print_sorted_igd_plus_per_strategy:
+            data['igd_plus'] = self.analysis.compute_igd_plus_per_strategy(df, problem, objs_elements, pattern_template)
+            figs = self.analysis.plot_igd_plus_per_strategy(df, problem, objs_elements, pattern_template, figs, data['igd_plus'])
 
         if figs:
             import os
@@ -3341,12 +3523,55 @@ class SaveAllResultsCP2025:
             os.makedirs(output_dir, exist_ok=True)
 
             for name, fig in figs.items():
+                # Infer plot type from name
+                if "igd_plus_sorted_per_instance" in name:
+                    plot_type = "igd_plus"
+                elif "igd_sorted_per_instance" in name:
+                    plot_type = "igd"
+                elif "normalized_hv_sorted_per_instance" in name:
+                    plot_type = "hv"
+                elif "normalized_contribution_sorted" in name:
+                    plot_type = "hv_contribution"
+                else:
+                    plot_type = None
+                fig = self.clean_figure_for_paper(fig, plot_type)
+
                 fig_path = os.path.join(output_dir, f"{name}.pdf")
                 fig.savefig(fig_path, format='pdf', bbox_inches='tight')
                 plt.close(fig)  # optional: frees memory if you're done
             print(f"Saved {len(figs)} figures to '{output_dir}'")
         print("Creating plots done")
         return figs, data
+
+    def clean_figure_for_paper(self, fig, plot_type=None):
+        for ax in fig.axes:
+            # Remove title for paper version
+            ax.set_title("")
+
+            # ax.set_xlabel("Instances", fontsize=18)
+            if plot_type is not None:
+                ax.set_xlabel("Instances")
+
+            # Enable grid with rcParams styling
+            ax.grid(True, which='both')
+
+            # Adjust legend
+            legend = ax.get_legend()
+            if legend:
+                legend.set_title("")
+                for text in legend.get_texts():
+                    text.set_fontfamily('serif')
+                    text.set_fontsize(24)
+
+                # Legend position by plot type
+                if plot_type in ["igd", "igd_plus"]:
+                    ax.legend(loc='upper left', frameon=True)
+                elif plot_type in ["hv", "hv_contribution"]:
+                    ax.legend(loc='lower left', frameon=True)
+                else:
+                    ax.legend(loc='best', frameon=True)
+
+        return fig
 
 
 class FiguresTablesToPrint:
@@ -3360,6 +3585,7 @@ class FiguresTablesToPrint:
             print_sorted_normalized_hv_per_strategy=True,
             print_sorted_contribution_per_strategy=True,
             print_sorted_igd_per_strategy=True,
+            print_sorted_igd_plus_per_strategy=True,
             folder_path="cp2025",
             print_hv_evolution=False
     ):
@@ -3371,6 +3597,7 @@ class FiguresTablesToPrint:
         self.print_sorted_normalized_hv_per_strategy = print_sorted_normalized_hv_per_strategy
         self.print_sorted_contribution_per_strategy = print_sorted_contribution_per_strategy
         self.print_sorted_igd_per_strategy = print_sorted_igd_per_strategy
+        self.print_sorted_igd_plus_per_strategy = print_sorted_igd_plus_per_strategy
         self.folder_path = folder_path
         self.print_hv_evolution = print_hv_evolution
         self.print_config_lines()
@@ -3385,7 +3612,8 @@ class FiguresTablesToPrint:
                 f"latex_tables={self.print_latex_tables}),"
                 f"sorted_normalized_hv_per_strategy={self.print_sorted_normalized_hv_per_strategy},"
                 f"sorted_contribution_hv_per_strategy={self.print_sorted_contribution_per_strategy},"
-                f"print_sorted_igd_per_strategy={self.print_sorted_igd_per_strategy}")
+                f"print_sorted_igd_per_strategy={self.print_sorted_igd_per_strategy},"
+                f"print_sorted_igd_plus_per_strategy={self.print_sorted_igd_plus_per_strategy}")
 
     def print_config_lines(self):
         def symbol(value, is_safety=False):
@@ -3407,6 +3635,8 @@ class FiguresTablesToPrint:
             f"{symbol(self.print_sorted_contribution_per_strategy)} Print sorted contribution HV per strategy: {self.print_sorted_contribution_per_strategy}")
         print(
             f"{symbol(self.print_sorted_igd_per_strategy)} Print sorted IGD per strategy: {self.print_sorted_igd_per_strategy}")
+        print(
+            f"{symbol(self.print_sorted_igd_plus_per_strategy)} Print sorted IGD+ per strategy: {self.print_sorted_igd_plus_per_strategy}")
         print(f"Folder path: {self.folder_path}")
         print("")  # Just a clean newline
 
@@ -3444,9 +3674,9 @@ if __name__ == '__main__':
     figs_fronts = {}
 
     # todo for test copy code here for quick test
-    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/sims/fix_saug_10800_timeout/mo_fix_saug_10800_timeout_solutions_and_stats.csv"
+    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/ukp/saugmecon_gava_gias/mo_saugmecon_gava_gias_solutions_and_stats.csv"
 
-    problem = "sims"  # ukp, nqueens, rcpsp, sims_cost_clouds, automotive, flowshop_permutation
+    problem = "ukp"  # ukp, nqueens, rcpsp, sims_cost_clouds, automotive, flowshop_permutation
 
     df = analysis.csv_to_df(csv_file_path)
 
@@ -3455,22 +3685,65 @@ if __name__ == '__main__':
     df.front_generator = df.front_generator.str.replace("ParetoGavanelliGlobalConstraint", "Gavanelli")
     df.front_generator = df.front_generator.str.replace("ParetoDisjunctiveProgramming", "DisjProg")
 
-    if problem == "ukp":
-        objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
-    elif problem == "nqueens":
-        objs_elements, pattern_template = get_info_similar_instances_nqueens()
-    elif problem == "rcpsp":
-        objs_elements, pattern_template = get_info_similar_instances_rcpsp()
-    elif problem == "sims":
-        # todo deal with sims correctly
-        objs_elements, pattern_template = get_info_similar_instances_sims()
-        to_rename = SaveAllResultsCP2025([(csv_file_path, problem)], FiguresTablesToPrint())
-        df = to_rename.rename_sims_strategies_to_indicate_objectives(df)
-
-    data = analysis.compute_igd_per_strategy(df, problem, objs_elements, pattern_template)
-    figs = {}
-    figs = analysis.plot_normalized_contribution_per_strategy(df, problem, objs_elements, pattern_template, figs, data)
+    # if problem == "ukp":
+    #     objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
+    # elif problem == "nqueens":
+    #     objs_elements, pattern_template = get_info_similar_instances_nqueens()
+    # elif problem == "rcpsp":
+    #     objs_elements, pattern_template = get_info_similar_instances_rcpsp()
+    # elif problem == "sims":
+    #     # todo deal with sims correctly
+    #     objs_elements, pattern_template = get_info_similar_instances_sims()
+    #     to_rename = SaveAllResultsCP2025([(csv_file_path, problem)], FiguresTablesToPrint())
+    #     df = to_rename.rename_sims_strategies_to_indicate_objectives(df)
+    #
+    # data = analysis.compute_igd_per_strategy(df, problem, objs_elements, pattern_template)
+    # figs = {}
+    # figs = analysis.plot_normalized_contribution_per_strategy(df, problem, objs_elements, pattern_template, figs, data)
 
     # figsHVTime = {}
     # figsHVTime = analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template, figsHVTime,
     #                                                             plot_variance=True)
+    # Get evaluation of the experiments like in the Disjunctive Programming paper for exhasutive and non exhaustive instances
+    # todo select the part of the df in which you're interested
+    df_for_tables = df
+    comparison_strategies = ["GIA", "GIAubL", "GIAub"]
+    df_reduced = df[df[analysis.front_strategy].isin(comparison_strategies)]
+    df_for_tables = df_reduced
+
+    # stats to display
+    stats_exhaustive = [["time(s)", "front_cardinality"], ["sum_solutions_nodes", "front_cardinality"],
+                        ["sum_solutions_propagations", "front_cardinality"]]
+    stats_exhaustive_pretty_name = [["time(s)"], ["nodes"], ["propagations"]]
+
+    non_stats_headers = None  # they are inside the code
+    title_exhaustive = "Comparison strategies when all exhaustive"
+    title_non_exhaustive = "Comparison strategies when not all exhaustive"
+    for stats, stats_pretty_name in zip(stats_exhaustive, stats_exhaustive_pretty_name):
+        analysis.set_stats_exhaustive(stats, stats_pretty_name)
+        if problem == "ukp":
+            table_results = analysis.average_similar_ukp_moolibrary_instances(df_for_tables, non_stats_headers)
+        elif problem == "nqueens":
+            table_results = analysis.average_similar_nqueens_instances(df_for_tables, non_stats_headers)
+        elif problem == "rcpsp":
+            table_results = analysis.average_similar_rcpsp_instances(df_for_tables, non_stats_headers)
+        elif problem == "sims_cost_clouds":
+            # todo deal with sims correctly
+            table_results = analysis.average_similar_sims_instances(df_for_tables, non_stats_headers)
+        else:
+            print("The problem is not recognized")
+            table_results = [None, None]
+
+        if table_results[0] is not None:
+            non_stats_headers = ["K", "n", "instances", "p"]
+            table_exhaustive_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_results[0],
+                                                                                         non_stats_headers, True,
+                                                                                         title_exhaustive)
+            print(table_exhaustive_latex)
+    if table_results[1] is not None:
+        non_stats_headers = ["K", "n", "instances"]
+        table_non_exhaustive_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_results[1],
+                                                                                         non_stats_headers, False,
+                                                                                         title_non_exhaustive)
+        print("---------------Comparison strategies when not all exhaustive----------------------")
+        print(table_non_exhaustive_latex)

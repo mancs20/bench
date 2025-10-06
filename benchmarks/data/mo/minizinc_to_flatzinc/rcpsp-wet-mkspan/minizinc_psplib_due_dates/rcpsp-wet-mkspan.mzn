@@ -138,7 +138,7 @@ constraint
 %-----------------------------------------------------------------------------%
 % Objective.
 % Multi-objective
-var bool: minimization;
+bool: minimization;
 array[1..2] of var int: objs;
 constraint objs[1] = makespan;
 constraint objs[2] = wet;

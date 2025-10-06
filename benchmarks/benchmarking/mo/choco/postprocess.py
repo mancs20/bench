@@ -405,17 +405,25 @@ def is_experiment_in_csv(csv_path, key_data, allow_replace=False):
 
 if __name__ == "__main__":
     csv.field_size_limit(sys.maxsize)
-    calculate_evolution_for_gavanelli = True  # if the evolution of the hypervolume is not needed, set this to False,
+    calculate_evolution_for_gavanelli = False  # if the evolution of the hypervolume is not needed, set this to False,
     # as it could take a lot of time
-    calculate_evolution = True  # turn off the computation of the hypervolume evolution, it could be very expensive
-    output_dir = sys.argv[1]
-    if output_dir[-1] == "/":
-        output_dir = output_dir[:-1]
+    calculate_evolution = False  # turn off the computation of the hypervolume evolution, it could be very expensive
+    output_dir_or_existing_csv = sys.argv[1]
     input_file_path = Path(sys.argv[2])
     allow_replace = len(sys.argv) > 3 and sys.argv[3].lower() == "true"
-    output_file_path = Path(output_dir)
-    uid = os.path.basename(os.path.normpath(output_file_path))
-    sol_stats_filename = Path(output_dir + "/mo_" + uid + "_solutions_and_stats.csv")
+    # check if the output_dir_or_existing_csv is a directory or a file
+    if os.path.isfile(output_dir_or_existing_csv):
+        sol_stats_filename = Path(output_dir_or_existing_csv)
+    elif os.path.isdir(output_dir_or_existing_csv):
+        if output_dir_or_existing_csv[-1] == "/":
+            output_dir_or_existing_csv = output_dir_or_existing_csv[:-1]
+        output_file_path = Path(output_dir_or_existing_csv)
+        uid = os.path.basename(os.path.normpath(output_file_path))
+        sol_stats_filename = Path(output_dir_or_existing_csv + "/mo_" + uid + "_solutions_and_stats.csv")
+    else:
+        # If the path is neither a file nor a directory, exit with an error.
+        print(f"❌ The path {output_dir_or_existing_csv} is neither a valid file nor a directory.")
+        sys.exit(1)
 
     # Extract statistics line to identify the experiment
     metadata = {}
@@ -434,6 +442,6 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if is_experiment_in_csv(sol_stats_filename, metadata, allow_replace):
-        print(f"⚠️ Skipping {metadata['problem']}/{metadata['instance']} — already exists in CSV.")
+        print(f"⚠️ Skipping {metadata['problem']}/{metadata['instance']}/{metadata['front_generator']}/{metadata['timeout']} — already exists in CSV.")
     else:
         process_json_file(input_file_path, sol_stats_filename)
