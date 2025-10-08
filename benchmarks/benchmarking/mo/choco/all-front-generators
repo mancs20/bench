@@ -10,5 +10,5 @@ ParetoGavanelliGlobalConstraintNoEvolutionInfo
 ParetoDisjunctiveProgramming
 Saugmecon
 SaugmeconFrontVerify
-SaugmeconRecursive
-SaugmeconRecursiveFrontVerify
+SaugmeconNoR
+SaugmeconNoRFrontVerify
