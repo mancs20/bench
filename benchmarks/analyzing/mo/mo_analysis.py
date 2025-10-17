@@ -5,6 +5,7 @@ from collections import Counter
 
 import pandas as pd
 import seaborn as sns
+import itertools as it
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -15,6 +16,7 @@ from pymoo.indicators.hv import Hypervolume
 from pymoo.indicators.igd import IGD
 from pymoo.indicators.igd_plus import IGDPlus
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
+from pathlib import Path
 
 
 def find_closest_time_index_to_time_t(x_all_times, id_times, t):
@@ -199,7 +201,7 @@ def set_general_plot_style():
 
 class MoAnalysis:
 
-    def __init__(self, benchmark='benchmark', problem='problem', instance='instance', solver_name='solver',
+    def __init__(self, strategies=None, benchmark='benchmark', problem='problem', instance='instance', solver_name='solver',
                  front_strategy='front_generator',
                  hypervolume='hypervolume', pareto_front='pareto_front',
                  hypervolume_evolution='hypervolume_evolution', number_of_solutions='front_cardinality',
@@ -242,6 +244,14 @@ class MoAnalysis:
             self.all_solutions = all_solutions
 
         # strategies's colors
+        if strategies is None:
+            self.create_default_strategies()
+        else:
+            self.fixed_strategies = strategies.strategies_list
+            self.strategy_colors = strategies.colors
+            self.strategy_markers = strategies.markers
+
+    def create_default_strategies(self):
         self.fixed_strategies = ["GIA", "GIAub", "GIAubL", "DisjProg", "Gavanelli", "Saugmecon"]
         self.strategy_colors = dict(
             zip(self.fixed_strategies, sns.color_palette("colorblind", len(self.fixed_strategies))))
@@ -3247,16 +3257,16 @@ class MoAnalysis:
 
 class SaveAllResultsCP2025:
 
-    # folder_path = "cp2025"
-
-    def __init__(self, csv_paths_problem, config=None):
+    def __init__(self, csv_paths_problem, config=None, strategies=None):
         self.csv_paths_problem = csv_paths_problem  # expecting list of (csv_path, problem_name) tuples
         # Ex: csvs = [("rcpsp.csv", "rcpsp"), ("ukp.csv", "ukp")]
         # runner = SaveAllResultsCP2025(csvs)
-        self.analysis = MoAnalysis()
         if config is None:
             raise ValueError("Config is required")
         self.config = config
+        if strategies is None:
+            raise ValueError("Strategies is required")
+        self.analysis = MoAnalysis(strategies)
 
     def save_all_results(self):
         print("Starting to save all results. Here we go!")
@@ -3270,6 +3280,9 @@ class SaveAllResultsCP2025:
         df = self.analysis.csv_to_df(csv_path)
         print(f"Processing {csv_path} for problem {problem}")
 
+        current_strategies = set(self.analysis.fixed_strategies)
+        df = df.loc[df[self.analysis.front_strategy].isin(current_strategies)]
+
         figs = {}
         latex_text = ""
         if self.config.print_hv_evolution:
@@ -3280,12 +3293,18 @@ class SaveAllResultsCP2025:
             df = self.rename_sims_strategies_to_indicate_objectives(df)
 
         if self.config.do_safety_checks:
-            if not self.safety_checks_exhaustive(df):
+            if not self.safety_check_all_instances_same_number_strategies(df):
+                print(f"Safety checks for all instances having the same number of strategies has failed for {csv_path}")
+                return None, None
+            if not self.safety_check_exhaustive(df):
                 print(f"Safety checks for exhaustive conditions has failed for {csv_path}")
-                return
+                return None, None
             if not self.safety_check_fronts(df):
                 print(f"Safety checks for fronts has failed for {csv_path}")
-                return
+                return None, None
+            if not self.safety_check_no_duplicates(df):
+                print(f"Safety checks for duplicates has failed for {csv_path}")
+                return None, None
             print("Safety checks passed")
         else:
             print(f"⚠️ Unless you are sure, it is recommended to enable safety checks")
@@ -3337,7 +3356,7 @@ class SaveAllResultsCP2025:
         df.instance = df.instance.str.replace("145", "150")
         return df
 
-    def safety_checks_exhaustive(self, df):
+    def safety_check_all_instances_same_number_strategies(self, df):
         # Count the number of unique strategies
         number_of_strategies = df[self.analysis.front_strategy].nunique()
 
@@ -3347,8 +3366,24 @@ class SaveAllResultsCP2025:
         if groups_with_missing_strategies.size > 0:
             print("There are groups with different numbers of strategies")
             print(groups_with_missing_strategies)
+            # save a dataframe with the details using save_temp_csv_for_debugging
+            problem_instances = groups_with_missing_strategies.index
+            cols_to_show = [
+                self.analysis.problem,
+                self.analysis.instance,
+                self.analysis.front_strategy,
+                'datetime'
+            ]
+            df_to_save = df[df[self.analysis.instance].isin(problem_instances)]
+            self.save_temp_csv_for_debugging(df_to_save, problem_instances, cols_to_show,
+                                             "different number of strategies for different instances")
+            return False
+        else:
+            print("All the groups have the same number of strategies")
+        return True
 
-        # Ensure hypervolume column has no NaN values
+    def safety_check_exhaustive(self, df):
+       # Ensure hypervolume column has no NaN values
         df.fillna({"hypervolume": 0}, inplace=True)
 
         # Filter only rows where exhaustive == True
@@ -3361,6 +3396,28 @@ class SaveAllResultsCP2025:
         if hypervolume_diff.size > 0:
             print("There are groups where exhaustive=True rows have different hypervolumes:")
             print(hypervolume_diff)
+
+            df_exhaustive = df_exhaustive.copy()
+            df_exhaustive['pareto_front_size'] = df_exhaustive[self.analysis.pareto_front].apply(
+                lambda v: 0 if pd.isna(v)
+                else len(v) if isinstance(v, (list, tuple))
+                else (len(ast.literal_eval(v)) if isinstance(v, str) else 0)
+            )
+
+            cols_to_show = [
+                self.analysis.problem,
+                self.analysis.instance,
+                self.analysis.front_strategy,
+                'pareto_front_size',
+                self.analysis.hypervolume,
+                self.analysis.exhaustive,
+                self.analysis.time,
+                'sum_solutions_resolution_time(s)',
+                'datetime',
+                self.analysis.pareto_front,
+            ]
+            problem_instances = hypervolume_diff.index
+            self.save_temp_csv_for_debugging(df_exhaustive, problem_instances, cols_to_show, "different hypervolumes when exhaustive=true")
             return False
         else:
             print("The strategies that are exhaustive produce the same hypervolume")
@@ -3375,6 +3432,33 @@ class SaveAllResultsCP2025:
             f"Number of groups where not all strategies are exhaustive = True: {count_not_all_exhaustive} / {total_groups}")
 
         return True
+
+    def save_temp_csv_for_debugging(self, df_to_save, problem_instances, cols_to_show, issue_type):
+        details = (
+            df_to_save[df_to_save[self.analysis.instance].isin(problem_instances)][cols_to_show]
+            .sort_values([self.analysis.instance, self.analysis.front_strategy, 'datetime'])
+        )
+        print(f"\nDetails for issue: {issue_type}")
+        print(details.to_string(index=False))
+
+        # Save details to a CSV file in a temp directory
+        # unique problem names (sorted for stable filenames)
+        problems = sorted(map(str, df_to_save[self.analysis.problem].dropna().unique()))
+
+        # join and sanitize for filesystem safety
+        problems_for_file_name = "-".join(problems)
+        problems_for_file_name = re.sub(r"[^A-Za-z0-9._-]+", "_", problems_for_file_name)
+
+        try:
+            base_dir = Path(__file__).resolve().parent  # folder of the .py file
+        except NameError:
+            base_dir = Path.cwd()  # Jupyter / REPL fallback
+
+        out_dir = base_dir / "temp"
+        out_dir.mkdir(exist_ok=True)
+        out_path = out_dir / f"{issue_type}_issues_{problems_for_file_name}.csv"
+        details.to_csv(out_path, index=False)
+        print(f"Saved exhaustive issues details to: {out_path}")
 
     def safety_check_fronts(self, df):
         row = df.iloc[0]
@@ -3412,6 +3496,32 @@ class SaveAllResultsCP2025:
             return False
         return True
 
+    def safety_check_no_duplicates(self, df):
+        key_cols = [self.analysis.instance, self.analysis.front_strategy]
+        dupes = df[df.duplicated(subset=key_cols, keep=False)].sort_values(
+            [self.analysis.instance, self.analysis.front_strategy, 'datetime'])
+
+        if dupes.empty:
+            print("There are no duplicates")
+            return True
+        else:
+            print("There are duplicates. Below the details:")
+            print(dupes[[self.analysis.instance, self.analysis.front_strategy, 'datetime']].to_string(index=False))
+            cols_to_show = [
+                self.analysis.problem,
+                self.analysis.instance,
+                self.analysis.front_strategy,
+                self.analysis.hypervolume,
+                self.analysis.exhaustive,
+                self.analysis.time,
+                'sum_solutions_resolution_time(s)',
+                'datetime',
+                self.analysis.pareto_front,
+            ]
+            problem_instances = dupes.instance.unique()
+            self.save_temp_csv_for_debugging(dupes, problem_instances, cols_to_show, "duplicate rows")
+            return False
+
     def save_latex_table_text(self, df, problem):
         # Get evaluation of the experiments like in the Disjunctive Programming paper for exhasutive and non exhaustive instances
         # todo select the part of the df in which you're interested
@@ -3421,18 +3531,17 @@ class SaveAllResultsCP2025:
         stats_exhaustive = [["time(s)", "front_cardinality"], ["sum_solutions_nodes", "front_cardinality"]]
         stats_exhaustive_pretty_name = [["time(s)"], ["nodes"]]
 
-        subfolder_path = os.path.join(self.folder_path, problem)
         text_to_save = ""
         non_stats_headers = None  # they are inside the code
         # title_exhaustive = "Comparison strategies when all exhaustive"
         # title_non_exhaustive = "Comparison strategies when not all exhaustive"
         for stats, stats_pretty_name in zip(stats_exhaustive, stats_exhaustive_pretty_name):
             self.analysis.set_stats_exhaustive(stats, stats_pretty_name)
-            if problem == "ukp":
+            if problem == "MUKP":
                 table_results = self.analysis.average_similar_ukp_moolibrary_instances(df, non_stats_headers)
-            elif problem == "nqueens":
+            elif problem == "MN-Queens":
                 table_results = self.analysis.average_similar_nqueens_instances(df, non_stats_headers)
-            elif problem == "rcpsp":
+            elif problem == "MORCPSP":
                 table_results = self.analysis.average_similar_rcpsp_instances(df, non_stats_headers)
             elif problem == "sims":
                 # todo deal with sims correctly
@@ -3465,7 +3574,7 @@ class SaveAllResultsCP2025:
             text_to_save += "\n\n"
             text_to_save += table_non_exhaustive_latex
         # Save the text to a file
-        output_dir = os.path.join(self.folder_path, problem)
+        output_dir = os.path.join(self.config.folder_path, problem)
         os.makedirs(output_dir, exist_ok=True)
         text_file_path = os.path.join(output_dir, f"table_results_{problem}.tex")
         with open(text_file_path, "w") as text_file:
@@ -3641,6 +3750,24 @@ class FiguresTablesToPrint:
         print("")  # Just a clean newline
 
 
+class Strategies:
+    _BASE_MARKERS = ['o', 's', '^', 'D', 'X', '*', 'P', 'v', '>', '<', 'h', 'H', 'd', '8', 'p']
+
+    def __init__(self, strategies):
+        self.strategies_list = list(strategies)
+        self.colors = {}
+        self.markers = {}
+        self.assign_colors()
+        self.assign_markers()
+
+    def assign_colors(self):
+        self.colors = dict(zip(self.strategies_list, sns.color_palette("colorblind", len(self.strategies_list))))
+
+    def assign_markers(self):
+        markers = list(it.islice(it.cycle(self._BASE_MARKERS), len(self.strategies_list)))
+        self.markers = dict(zip(self.strategies_list, markers))
+
+
 class Cols:
     TIME_FOR_TIME_SCORE = 'time_for_time_score'
     TIME_SCORE_FOR_LEX_SCORE = 'time_score_for_lex_score'  # here the best score is the maximum: 1, representing the
@@ -3664,86 +3791,132 @@ class Metrics:
             self.minimization = minimization
 
 
+def for_test():
+    csv_file_path_problem = [
+        (
+            "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/ukp/saugmecon_gava_gias/mo_saugmecon_gava_gias_solutions_and_stats.csv",
+            "MUKP"
+        ),
+        (
+            "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/nqueens/saug_gava_gias_disj/mo_saug_gava_gias_disj_solutions_and_stats.csv",
+            "MN-Queens"
+        ),
+        (
+            "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/saug_gava_disjunctive_gias_10800/mo_saug_gava_disjunctive_gias_18000_solutions_and_stats.csv",
+            "MORCPSP"
+        ),
+        (
+            "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/sims/fix_saug_10800_timeout/mo_fix_saug_10800_timeout_solutions_and_stats.csv",
+            "SIMS"
+        )
+    ]
+    print_config = FiguresTablesToPrint(
+        do_safety_checks=True,
+        print_time_vs_instances=False,
+        print_cumulative_hv=False,
+        print_hv_histogram=False,
+        print_latex_tables=True,
+        print_sorted_normalized_hv_per_strategy=True,
+        print_sorted_contribution_per_strategy=True,
+        print_sorted_igd_per_strategy=False,
+        print_sorted_igd_plus_per_strategy=True,
+        folder_path="multi-journal-saugmecon-variants",
+        print_hv_evolution=False
+    )
+
+    # strategies = ["GIA", "GIAub", "GIAubL", "DisjProg", "Gavanelli", "Saugmecon", "SaugmeconNoR"]  # example
+    strategies = ["Saugmecon", "SaugmeconNoR"]  # example
+    strategies_styled = Strategies(strategies)
+
+    runner = SaveAllResultsCP2025(csv_file_path_problem, print_config, strategies_styled)
+    figs_paper, data_paper = runner.save_all_results()
+
+
+
 # add main function to run the analysis
 if __name__ == '__main__':
-    analysis = MoAnalysis()
-    # prepare folder to save data
-    figs_general_stats = {}
-    csvs = {}
-    fig_hv_time = {}
-    figs_fronts = {}
+    just_test = True
+    if just_test:
+        for_test()
+    else:
+        analysis = MoAnalysis()
+        # prepare folder to save data
+        figs_general_stats = {}
+        csvs = {}
+        fig_hv_time = {}
+        figs_fronts = {}
 
-    # todo for test copy code here for quick test
-    csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/ukp/saugmecon_gava_gias/mo_saugmecon_gava_gias_solutions_and_stats.csv"
+        # todo for test copy code here for quick test
+        csv_file_path = "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/ukp/saugmecon_gava_gias/mo_saugmecon_gava_gias_solutions_and_stats.csv"
 
-    problem = "ukp"  # ukp, nqueens, rcpsp, sims_cost_clouds, automotive, flowshop_permutation
+        problem = "ukp"  # ukp, nqueens, rcpsp, sims_cost_clouds, automotive, flowshop_permutation
 
-    df = analysis.csv_to_df(csv_file_path)
+        df = analysis.csv_to_df(csv_file_path)
 
-    df.front_generator = df.front_generator.str.replace("GIA_boundedLazy", "GIAubL")
-    df.front_generator = df.front_generator.str.replace("GIA_bounded", "GIAub")
-    df.front_generator = df.front_generator.str.replace("ParetoGavanelliGlobalConstraint", "Gavanelli")
-    df.front_generator = df.front_generator.str.replace("ParetoDisjunctiveProgramming", "DisjProg")
+        df.front_generator = df.front_generator.str.replace("GIA_boundedLazy", "GIAubL")
+        df.front_generator = df.front_generator.str.replace("GIA_bounded", "GIAub")
+        df.front_generator = df.front_generator.str.replace("ParetoGavanelliGlobalConstraint", "Gavanelli")
+        df.front_generator = df.front_generator.str.replace("ParetoDisjunctiveProgramming", "DisjProg")
 
-    # if problem == "ukp":
-    #     objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
-    # elif problem == "nqueens":
-    #     objs_elements, pattern_template = get_info_similar_instances_nqueens()
-    # elif problem == "rcpsp":
-    #     objs_elements, pattern_template = get_info_similar_instances_rcpsp()
-    # elif problem == "sims":
-    #     # todo deal with sims correctly
-    #     objs_elements, pattern_template = get_info_similar_instances_sims()
-    #     to_rename = SaveAllResultsCP2025([(csv_file_path, problem)], FiguresTablesToPrint())
-    #     df = to_rename.rename_sims_strategies_to_indicate_objectives(df)
-    #
-    # data = analysis.compute_igd_per_strategy(df, problem, objs_elements, pattern_template)
-    # figs = {}
-    # figs = analysis.plot_normalized_contribution_per_strategy(df, problem, objs_elements, pattern_template, figs, data)
+        # if problem == "MUKP":
+        #     objs_elements, pattern_template = get_info_similar_instances_ukp_moolibrary()
+        # elif problem == "MN-Queens":
+        #     objs_elements, pattern_template = get_info_similar_instances_nqueens()
+        # elif problem == "MORCPSP":
+        #     objs_elements, pattern_template = get_info_similar_instances_rcpsp()
+        # elif problem == "sims":
+        #     # todo deal with sims correctly
+        #     objs_elements, pattern_template = get_info_similar_instances_sims()
+        #     to_rename = SaveAllResultsCP2025([(csv_file_path, problem)], FiguresTablesToPrint())
+        #     df = to_rename.rename_sims_strategies_to_indicate_objectives(df)
+        #
+        # data = analysis.compute_igd_per_strategy(df, problem, objs_elements, pattern_template)
+        # figs = {}
+        # figs = analysis.plot_normalized_contribution_per_strategy(df, problem, objs_elements, pattern_template, figs, data)
 
-    # figsHVTime = {}
-    # figsHVTime = analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template, figsHVTime,
-    #                                                             plot_variance=True)
-    # Get evaluation of the experiments like in the Disjunctive Programming paper for exhasutive and non exhaustive instances
-    # todo select the part of the df in which you're interested
-    df_for_tables = df
-    comparison_strategies = ["GIA", "GIAubL", "GIAub"]
-    df_reduced = df[df[analysis.front_strategy].isin(comparison_strategies)]
-    df_for_tables = df_reduced
+        # figsHVTime = {}
+        # figsHVTime = analysis.plot_normalized_hypervolume_evolution(df, problem, objs_elements, pattern_template, figsHVTime,
+        #                                                             plot_variance=True)
+        # Get evaluation of the experiments like in the Disjunctive Programming paper for exhasutive and non exhaustive instances
+        # todo select the part of the df in which you're interested
+        df_for_tables = df
+        comparison_strategies = ["GIA", "GIAubL", "GIAub"]
+        df_reduced = df[df[analysis.front_strategy].isin(comparison_strategies)]
+        df_for_tables = df_reduced
 
-    # stats to display
-    stats_exhaustive = [["time(s)", "front_cardinality"], ["sum_solutions_nodes", "front_cardinality"],
-                        ["sum_solutions_propagations", "front_cardinality"]]
-    stats_exhaustive_pretty_name = [["time(s)"], ["nodes"], ["propagations"]]
+        # stats to display
+        stats_exhaustive = [["time(s)", "front_cardinality"], ["sum_solutions_nodes", "front_cardinality"],
+                            ["sum_solutions_propagations", "front_cardinality"]]
+        stats_exhaustive_pretty_name = [["time(s)"], ["nodes"], ["propagations"]]
 
-    non_stats_headers = None  # they are inside the code
-    title_exhaustive = "Comparison strategies when all exhaustive"
-    title_non_exhaustive = "Comparison strategies when not all exhaustive"
-    for stats, stats_pretty_name in zip(stats_exhaustive, stats_exhaustive_pretty_name):
-        analysis.set_stats_exhaustive(stats, stats_pretty_name)
-        if problem == "ukp":
-            table_results = analysis.average_similar_ukp_moolibrary_instances(df_for_tables, non_stats_headers)
-        elif problem == "nqueens":
-            table_results = analysis.average_similar_nqueens_instances(df_for_tables, non_stats_headers)
-        elif problem == "rcpsp":
-            table_results = analysis.average_similar_rcpsp_instances(df_for_tables, non_stats_headers)
-        elif problem == "sims_cost_clouds":
-            # todo deal with sims correctly
-            table_results = analysis.average_similar_sims_instances(df_for_tables, non_stats_headers)
-        else:
-            print("The problem is not recognized")
-            table_results = [None, None]
+        non_stats_headers = None  # they are inside the code
+        title_exhaustive = "Comparison strategies when all exhaustive"
+        title_non_exhaustive = "Comparison strategies when not all exhaustive"
+        for stats, stats_pretty_name in zip(stats_exhaustive, stats_exhaustive_pretty_name):
+            analysis.set_stats_exhaustive(stats, stats_pretty_name)
+            if problem == "MUKP":
+                table_results = analysis.average_similar_ukp_moolibrary_instances(df_for_tables, non_stats_headers)
+            elif problem == "MN-Queens":
+                table_results = analysis.average_similar_nqueens_instances(df_for_tables, non_stats_headers)
+            elif problem == "MORCPSP":
+                table_results = analysis.average_similar_rcpsp_instances(df_for_tables, non_stats_headers)
+            elif problem == "sims_cost_clouds":
+                # todo deal with sims correctly
+                table_results = analysis.average_similar_sims_instances(df_for_tables, non_stats_headers)
+            else:
+                print("The problem is not recognized")
+                table_results = [None, None]
 
-        if table_results[0] is not None:
-            non_stats_headers = ["K", "n", "instances", "p"]
-            table_exhaustive_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_results[0],
-                                                                                         non_stats_headers, True,
-                                                                                         title_exhaustive)
-            print(table_exhaustive_latex)
-    if table_results[1] is not None:
-        non_stats_headers = ["K", "n", "instances"]
-        table_non_exhaustive_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_results[1],
-                                                                                         non_stats_headers, False,
-                                                                                         title_non_exhaustive)
-        print("---------------Comparison strategies when not all exhaustive----------------------")
-        print(table_non_exhaustive_latex)
+            if table_results[0] is not None:
+                non_stats_headers = ["K", "n", "instances", "p"]
+                table_exhaustive_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_results[0],
+                                                                                             non_stats_headers, True,
+                                                                                             title_exhaustive)
+                print(table_exhaustive_latex)
+        if table_results[1] is not None:
+            non_stats_headers = ["K", "n", "instances"]
+            table_non_exhaustive_latex = analysis.disjunctive_paper_style_dataframe_to_latex(table_results[1],
+                                                                                             non_stats_headers, False,
+                                                                                             title_non_exhaustive)
+            print("---------------Comparison strategies when not all exhaustive----------------------")
+            print(table_non_exhaustive_latex)
