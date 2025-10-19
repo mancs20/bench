@@ -245,17 +245,16 @@ class MoAnalysis:
 
         # strategies's colors
         if strategies is None:
-            self.create_default_strategies()
+            self.strategies = self.create_default_strategies()
         else:
-            self.fixed_strategies = strategies.strategies_list
-            self.strategy_colors = strategies.colors
-            self.strategy_markers = strategies.markers
+            self.strategies = strategies
+        self.fixed_strategies = self.strategies.strategies_better_name
+        self.strategy_colors = self.strategies.colors
+        self.strategy_markers = self.strategies.markers
 
     def create_default_strategies(self):
-        self.fixed_strategies = ["GIA", "GIAub", "GIAubL", "DisjProg", "Gavanelli", "Saugmecon"]
-        self.strategy_colors = dict(
-            zip(self.fixed_strategies, sns.color_palette("colorblind", len(self.fixed_strategies))))
-        self.strategy_markers = dict(zip(self.fixed_strategies, ['o', 's', '^', 'D', 'X', '*']))
+        default_strategies = ["GIA", "GIAub", "GIAubL", "DisjProg", "Gavanelli", "Saugmecon"]
+        return Strategies(default_strategies)
 
     @staticmethod
     def csv_to_df(file_path):
@@ -3280,7 +3279,7 @@ class SaveAllResultsCP2025:
         df = self.analysis.csv_to_df(csv_path)
         print(f"Processing {csv_path} for problem {problem}")
 
-        current_strategies = set(self.analysis.fixed_strategies)
+        current_strategies = set(self.analysis.strategies.strategies_original_name_list)
         df = df.loc[df[self.analysis.front_strategy].isin(current_strategies)]
 
         figs = {}
@@ -3335,18 +3334,9 @@ class SaveAllResultsCP2025:
 
     def beautify_strategies_names(self, df):
         df = df.copy()
-        df.front_generator = df.front_generator.str.replace("GIA_boundedLazy", "GIAubL")
-        df.front_generator = df.front_generator.str.replace("GIA_bounded", "GIAub")
-        df.front_generator = df.front_generator.str.replace("ParetoGavanelliGlobalConstraint", "Gavanelli")
-        df.front_generator = df.front_generator.str.replace("ParetoDisjunctiveProgramming", "DisjProg")
-
-        # todo if more strategies
-        # fixed_strategies = ["GIA", "GIAub", "GIAubL", "DisjProg", "Gavanelli", "Saugmecon"]  # example
-        # strategy_colors = dict(zip(fixed_strategies, sns.color_palette("colorblind", len(fixed_strategies))))
-        # strategy_markers = dict(zip(fixed_strategies, ['o', 's', '^', 'D', 'X', '*']))
-
-        # self.analysis.set_fixed_strategies(fixed_strategies, strategy_colors, strategy_markers)
-
+        df["front_generator"] = df["front_generator"].replace(
+            Strategies.mapping_strategy_names, regex=False
+        )
         return df
 
     def rename_sims_strategies_to_indicate_objectives(self, df):
@@ -3497,20 +3487,21 @@ class SaveAllResultsCP2025:
         return True
 
     def safety_check_no_duplicates(self, df):
-        key_cols = [self.analysis.instance, self.analysis.front_strategy]
+        key_cols = [self.analysis.instance, self.analysis.front_strategy, self.analysis.timeout]
         dupes = df[df.duplicated(subset=key_cols, keep=False)].sort_values(
-            [self.analysis.instance, self.analysis.front_strategy, 'datetime'])
+            [self.analysis.instance, self.analysis.front_strategy, self.analysis.timeout, 'datetime'])
 
         if dupes.empty:
             print("There are no duplicates")
             return True
         else:
             print("There are duplicates. Below the details:")
-            print(dupes[[self.analysis.instance, self.analysis.front_strategy, 'datetime']].to_string(index=False))
+            print(dupes[[self.analysis.instance, self.analysis.front_strategy, self.analysis.timeout, 'datetime']].to_string(index=False))
             cols_to_show = [
                 self.analysis.problem,
                 self.analysis.instance,
                 self.analysis.front_strategy,
+                self.analysis.timeout,
                 self.analysis.hypervolume,
                 self.analysis.exhaustive,
                 self.analysis.time,
@@ -3521,6 +3512,31 @@ class SaveAllResultsCP2025:
             problem_instances = dupes.instance.unique()
             self.save_temp_csv_for_debugging(dupes, problem_instances, cols_to_show, "duplicate rows")
             return False
+
+    def remove_duplicates_and_save(self, df, strategies, dates, csv_path):
+        key_cols = [self.analysis.instance, self.analysis.front_strategy, self.analysis.timeout]
+        for strategy, cutoff_str in zip(strategies, dates):
+            df_strategy = df[df[self.analysis.front_strategy] == strategy]
+            dupes = df_strategy[df_strategy.duplicated(subset=key_cols, keep=False)]
+            if not dupes.empty:
+                # cutoff_date = pd.to_datetime(cutoff_str)
+
+                # groups (by key_cols) that have at least one row >= cutoff
+                has_newer = (
+                    df_strategy.groupby(key_cols)['datetime']
+                    .transform(lambda s: (s >= cutoff_str).any())
+                )
+
+                # drop only the older rows in groups that have a newer (>= cutoff)
+                drop_mask = (df_strategy['datetime'] < cutoff_str) & has_newer
+
+                df_strategy = df_strategy[~drop_mask]
+
+                df = df[df[self.analysis.front_strategy] != strategy]
+                df = pd.concat([df, df_strategy], ignore_index=True)
+
+        df.to_csv(csv_path, index=False)
+
 
     def save_latex_table_text(self, df, problem):
         # Get evaluation of the experiments like in the Disjunctive Programming paper for exhasutive and non exhaustive instances
@@ -3752,20 +3768,30 @@ class FiguresTablesToPrint:
 
 class Strategies:
     _BASE_MARKERS = ['o', 's', '^', 'D', 'X', '*', 'P', 'v', '>', '<', 'h', 'H', 'd', '8', 'p']
+    mapping_strategy_names = {
+        "GIA_boundedLazy": "GIAubL",
+        "GIA_bounded": "GIAub",
+        "ParetoGavanelliGlobalConstraint": "Gavanelli",
+        "ParetoDisjunctiveProgramming": "DisjProg",
+    }
 
     def __init__(self, strategies):
-        self.strategies_list = list(strategies)
+        self.strategies_original_name_list = list(strategies)
+        self.strategies_better_name = self.beautify_strategies_names()
         self.colors = {}
         self.markers = {}
         self.assign_colors()
         self.assign_markers()
 
+    def beautify_strategies_names(self):
+        return [Strategies.mapping_strategy_names.get(s, s) for s in self.strategies_original_name_list]
+
     def assign_colors(self):
-        self.colors = dict(zip(self.strategies_list, sns.color_palette("colorblind", len(self.strategies_list))))
+        self.colors = dict(zip(self.strategies_better_name, sns.color_palette("colorblind", len(self.strategies_better_name))))
 
     def assign_markers(self):
-        markers = list(it.islice(it.cycle(self._BASE_MARKERS), len(self.strategies_list)))
-        self.markers = dict(zip(self.strategies_list, markers))
+        markers = list(it.islice(it.cycle(self._BASE_MARKERS), len(self.strategies_better_name)))
+        self.markers = dict(zip(self.strategies_better_name, markers))
 
 
 class Cols:
