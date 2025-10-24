@@ -378,13 +378,13 @@ def get_stats_from_solution_message(solution_message, processed_data):
             sys.exit(1)
 
 
-def is_experiment_in_csv(csv_path, key_data, allow_replace=False):
+def proceed_to_write_experiment_in_csv(csv_path, key_data, allow_replace=False):
     """
-    Check if a record with the same (problem, instance, front_generator, timeout)
-    exists in the CSV. If allow_replace is True, only skip if the existing datetime is newer or same.
+    Returns a tuple where the first element indicates if we should proceed to write the csv or not, the second one indicates
+    if we are replacing an existing entry, if it is true we have to delete.
     """
     if not os.path.isfile(csv_path):
-        return False
+        return False, False
 
     key_fields = ["problem", "instance", "front_generator", "timeout"]
     target_key = tuple(key_data.get(k) for k in key_fields)
@@ -395,12 +395,26 @@ def is_experiment_in_csv(csv_path, key_data, allow_replace=False):
         for row in reader:
             row_key = tuple(row.get(k) for k in key_fields)
             if row_key == target_key:
-                if not allow_replace:
-                    return True
-                if "datetime" in row and row["datetime"] >= target_datetime:
-                    return True  # Skip if older or same
-                return False  # Proceed if current is newer
-    return False
+                if allow_replace and ("datetime" in row and row["datetime"] < target_datetime):
+                    return True, True
+                else:
+                    return False, False
+    return True, False
+
+def remove_row_from_csv(csv_path, key_data):
+    key_fields = ["problem", "instance", "front_generator", "timeout"]
+    target_key = tuple(key_data.get(k) for k in key_fields)
+
+    with open(csv_path, 'r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        rows = [row for row in reader if tuple(row.get(k) for k in key_fields) != target_key]
+        headers = reader.fieldnames
+
+    with open(csv_path, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
 
 
 if __name__ == "__main__":
@@ -441,7 +455,11 @@ if __name__ == "__main__":
         print(f"❌ Could not extract statistics from {input_file_path}")
         sys.exit(1)
 
-    if is_experiment_in_csv(sol_stats_filename, metadata, allow_replace):
+    proceed_to_write, overwrite = proceed_to_write_experiment_in_csv(sol_stats_filename, metadata, allow_replace)
+    if not proceed_to_write:
         print(f"⚠️ Skipping {metadata['problem']}/{metadata['instance']}/{metadata['front_generator']}/{metadata['timeout']} — already exists in CSV.")
     else:
+        if overwrite:
+            print(f"♻️ Overwriting existing entry for {metadata['problem']}/{metadata['instance']}/{metadata['front_generator']}/{metadata['timeout']}.")
+            remove_row_from_csv(sol_stats_filename, metadata)
         process_json_file(input_file_path, sol_stats_filename)
