@@ -8,8 +8,10 @@ BiObjGIA_regionImplementation
 ParetoGavanelliGlobalConstraint
 ParetoGavanelliGlobalConstraintNoEvolutionInfo
 ParetoDisjunctiveProgramming
-Saugmecon
 SaugmeconFrontVerify
 SaugmeconNoR
 SaugmeconNoRFrontVerify
 SimpleOptGlobalConstraint
+Saugmecon
+SaugmeconGlobal
+SaugmeconGlobalIntermediate
