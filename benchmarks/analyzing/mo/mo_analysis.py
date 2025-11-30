@@ -191,8 +191,9 @@ def set_general_plot_style():
         "ytick.labelsize": 16,
         "legend.fontsize": 24,
         "lines.markersize": 8,
-        # "lines.linewidth": 1.8,
-        # Grid style (but must be enabled manually)
+        # grid style + enable it globally
+        "axes.grid": True,
+        "axes.axisbelow": True,
         "grid.linestyle": "--",
         "grid.linewidth": 0.5,
         "grid.alpha": 0.7,
@@ -3266,6 +3267,7 @@ class SaveAllResultsCP2025:
         if strategies is None:
             raise ValueError("Strategies is required")
         self.analysis = MoAnalysis(strategies)
+        self.strategies = strategies
 
     def save_all_results(self):
         print("Starting to save all results. Here we go!")
@@ -3335,7 +3337,7 @@ class SaveAllResultsCP2025:
     def beautify_strategies_names(self, df):
         df = df.copy()
         df["front_generator"] = df["front_generator"].replace(
-            Strategies.mapping_strategy_names, regex=False
+            self.strategies.mapping_strategy_names, regex=False
         )
         return df
 
@@ -3768,14 +3770,10 @@ class FiguresTablesToPrint:
 
 class Strategies:
     _BASE_MARKERS = ['o', 's', '^', 'D', 'X', '*', 'P', 'v', '>', '<', 'h', 'H', 'd', '8', 'p']
-    mapping_strategy_names = {
-        "GIA_boundedLazy": "GIAubL",
-        "GIA_bounded": "GIAub",
-        "ParetoGavanelliGlobalConstraint": "Gavanelli",
-        "ParetoDisjunctiveProgramming": "DisjProg",
-    }
 
-    def __init__(self, strategies):
+    def __init__(self, mapping_strategy_names):
+        self.mapping_strategy_names = mapping_strategy_names
+        strategies = mapping_strategy_names.keys()
         self.strategies_original_name_list = list(strategies)
         self.strategies_better_name = self.beautify_strategies_names()
         self.colors = {}
@@ -3784,7 +3782,7 @@ class Strategies:
         self.assign_markers()
 
     def beautify_strategies_names(self):
-        return [Strategies.mapping_strategy_names.get(s, s) for s in self.strategies_original_name_list]
+        return [self.mapping_strategy_names.get(s, s) for s in self.strategies_original_name_list]
 
     def assign_colors(self):
         self.colors = dict(zip(self.strategies_better_name, sns.color_palette("colorblind", len(self.strategies_better_name))))
