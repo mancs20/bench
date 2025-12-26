@@ -15,3 +15,5 @@ SimpleOptGlobalConstraint
 Saugmecon
 SaugmeconGlobal
 SaugmeconGlobalIntermediate
+ParetoDisjunctiveProgrammingNoLabel
+SaugmeconNoRTestReal

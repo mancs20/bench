@@ -78,6 +78,8 @@ def process_json_file(input_json_file_path, output_stats_filename):
                 errors += line
         elif "exception" in line.lower():
             exceptions.append(line)
+        elif "error" in line.lower():
+            errors.append(line)
 
     if errors != [] or exceptions != []:
         print(f"Error in {sys.argv[2]}", file=sys.stderr)
