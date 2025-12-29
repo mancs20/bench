@@ -380,7 +380,7 @@ def get_stats_from_solution_message(solution_message, processed_data):
             sys.exit(1)
 
 
-def proceed_to_write_experiment_in_csv(csv_path, key_data, allow_replace=False):
+def proceed_to_write_experiment_in_csv(csv_path, key_data, allow_replace=False, force=False):
     """
     Returns a tuple where the first element indicates if we should proceed to write the csv or not, the second one indicates
     if we are replacing an existing entry, if it is true we have to delete.
@@ -397,7 +397,7 @@ def proceed_to_write_experiment_in_csv(csv_path, key_data, allow_replace=False):
         for row in reader:
             row_key = tuple(row.get(k) for k in key_fields)
             if row_key == target_key:
-                if allow_replace and ("datetime" in row and row["datetime"] < target_datetime):
+                if force or (allow_replace and ("datetime" in row and row["datetime"] < target_datetime)):
                     return True, True
                 else:
                     return False, False
@@ -420,6 +420,10 @@ def remove_row_from_csv(csv_path, key_data):
 
 
 if __name__ == "__main__":
+    # set to True to force replace existing entries in the CSV, regardless of datetime. Use with caution.
+    # It should be set back to False after use.
+    force_replace = False
+
     csv.field_size_limit(sys.maxsize)
     calculate_evolution_for_gavanelli = False  # if the evolution of the hypervolume is not needed, set this to False,
     # as it could take a lot of time
@@ -457,7 +461,7 @@ if __name__ == "__main__":
         print(f"❌ Could not extract statistics from {input_file_path}")
         sys.exit(1)
 
-    proceed_to_write, overwrite = proceed_to_write_experiment_in_csv(sol_stats_filename, metadata, allow_replace)
+    proceed_to_write, overwrite = proceed_to_write_experiment_in_csv(sol_stats_filename, metadata, allow_replace, force=force_replace)
     if not proceed_to_write:
         print(f"⚠️ Skipping {metadata['problem']}/{metadata['instance']}/{metadata['front_generator']}/{metadata['timeout']} — already exists in CSV.")
     else:

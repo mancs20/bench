@@ -12,6 +12,7 @@
 
 # Exits when an error occurs.
 set -e
+set -o pipefail
 set -x # useful for debugging.
 
 # Shortcuts of paths to benchmarking directories.
@@ -31,9 +32,9 @@ source "${BENCHMARKS_DIR_PATH}"/../pybench/bin/activate
 
 # If it has an argument, we retry the jobs that failed on a previous run.
 # If the experiments were not complete, you can simply rerun the script, parallel will ignore the jobs that are already done.
-if [ -n "$2" ]; then
-  parallel --retry-failed --joblog $2
-  exit 0
+RESUME_FLAG="--resume"
+if [ "$2" = "retry" ]; then
+  RESUME_FLAG="--resume-failed"
 fi
 
 # I. Define the campaign to run.
@@ -79,4 +80,4 @@ lshw -json > "$OUTPUT_DIR/$(basename "$CHOCO_WORKFLOW_PATH")/hardware-$MACHINE".
 # The `parallel` command spawns one `srun` command per experiment, which executes the minizinc solver with the right resources.
 
 COMMANDS_LOG="$OUTPUT_DIR/$(basename "$CHOCO_WORKFLOW_PATH")/jobs.log"
-parallel --verbose --no-run-if-empty --rpl '{} uq()' -k --colsep ',' --skip-first-line -j "$NUM_PARALLEL_EXPERIMENTS" --resume --joblog "$COMMANDS_LOG" " $SRUN_COMMAND $CHOCO_MO_JAR_COMMAND {1} {2} {3} \"$BENCHMARKING_DIR_PATH\"/{4} $SEARCH_STRATEGY $TIMEOUT {5} $CORES 2>&1 | python3 \"$DUMP_PY_PATH\" \"$OUTPUT_DIR\" {1} {2} {3} {5} $SOLVER $VERSION $CORES $THREADS $TIMEOUT $MEM_GB_PER_XP " :::: "$INSTANCES_PATH" :::: "$FRONT_GENERATION_PATH"
+parallel --verbose --no-run-if-empty --rpl '{} uq()' -k --colsep ',' --skip-first-line -j "$NUM_PARALLEL_EXPERIMENTS" $RESUME_FLAG --joblog "$COMMANDS_LOG" " $SRUN_COMMAND $CHOCO_MO_JAR_COMMAND {1} {2} {3} \"$BENCHMARKING_DIR_PATH\"/{4} $SEARCH_STRATEGY $TIMEOUT {5} $CORES 2>&1 | python3 \"$DUMP_PY_PATH\" \"$OUTPUT_DIR\" {1} {2} {3} {5} $SOLVER $VERSION $CORES $THREADS $TIMEOUT $MEM_GB_PER_XP " :::: "$INSTANCES_PATH" :::: "$FRONT_GENERATION_PATH"
