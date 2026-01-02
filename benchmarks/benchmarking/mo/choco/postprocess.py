@@ -19,6 +19,8 @@ fields_to_check = {
     'sum_solutions_backjumps': 'Backjumps',
 }
 
+LEXICOGRAPHIC_LINE = "Lexicographic optimization is used. Saugmecon objective is bigger than Integer.MAX_VALUE"
+
 
 def extract_hypervolume_lines(lines):
     """Extracts all HYPERVOLUME lines and parses them into [second, points]."""
@@ -57,6 +59,7 @@ def process_json_file(input_json_file_path, output_stats_filename):
     exceptions = []
     errors = []
     statistics = {}
+    lexicographic_opt = None
 
     # We keep successive experiments in the JSON file, even when they fail.
     # For the statistics, we are only interested by the latest experiment,
@@ -70,12 +73,15 @@ def process_json_file(input_json_file_path, output_stats_filename):
                     exceptions = []
                     errors = []
                     current_json_mo_solution_details = {}
+                    lexicographic_opt = None
             elif output["type"] == "statistics":
                 statistics.update(output["statistics"])
             elif output["type"] == "solutions-details":
                 current_json_mo_solution_details.update(output["solutions-details"])
             elif output["type"] == "error":
                 errors += line
+        elif LEXICOGRAPHIC_LINE in line:
+            lexicographic_opt = True
         elif "exception" in line.lower():
             exceptions.append(line)
         elif "error" in line.lower():
@@ -97,6 +103,9 @@ def process_json_file(input_json_file_path, output_stats_filename):
     front_metrics = {}
     if statistics:
         filtered_data = OrderedDict({field: statistics.get(field, None) for field in statistics_fields})
+        if "front_generator" in statistics and "saugmecon" in str(statistics["front_generator"]).lower():
+            # If we never saw the line, it means "checked and not present"
+            filtered_data["lexicographic_opt"] = (lexicographic_opt is True)
 
     if not current_json_mo_solution_details:
         instance_path = Path(sys.argv[2])
