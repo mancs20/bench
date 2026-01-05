@@ -18,7 +18,6 @@ from pymoo.indicators.igd_plus import IGDPlus
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 from pathlib import Path
 
-
 def find_closest_time_index_to_time_t(x_all_times, id_times, t):
     for i in range(id_times, len(x_all_times)):
         if x_all_times[i] > t:
@@ -3699,6 +3698,59 @@ class SaveAllResultsCP2025:
                     ax.legend(loc='best', frameon=True)
 
         return fig
+
+    @staticmethod
+    def check_if_two_fronts_are_equal(f1, f2):
+        """
+        Returns True iff both fronts contain the same points (as a *set*, i.e., ignoring order).
+        Also prints:
+          - original lengths
+          - unique-set lengths
+          - points in f1 not in f2
+          - points in f2 not in f1
+
+        Notes:
+          - This treats points as identical if their coordinate triples are identical.
+          - If you want "same multiset" (i.e., duplicates must match too), you can add a Counter check,
+            but you asked to stop at the set difference lists.
+        """
+        # Basic length check (list lengths; can differ even if sets are equal because of duplicates)
+        print("len(f1) =", len(f1), "len(f2) =", len(f2))
+
+        # Convert to sets of tuples (hashable)
+        s1 = set(tuple(p) for p in f1)
+        s2 = set(tuple(p) for p in f2)
+
+        print("len(set(f1)) =", len(s1), "len(set(f2)) =", len(s2))
+
+        if s1 == s2:
+            print("same set", s1 == s2)
+            return True
+        print("different sets")
+
+        # Collect explicit differences by membership checks (as you requested)
+        front1_not_in_f2 = []
+        for p in s1:
+            if p not in s2:
+                front1_not_in_f2.append(p)
+
+        front2_not_in_f1 = []
+        for p in s2:
+            if p not in s1:
+                front2_not_in_f1.append(p)
+
+        print("points in f1 (unique) not in f2:", len(front1_not_in_f2))
+        print("points in f2 (unique) not in f1:", len(front2_not_in_f1))
+
+        # Optional: print a few examples (helps debugging huge fronts)
+        if front1_not_in_f2:
+            print("example f1_not_in_f2:", front1_not_in_f2[0])
+        if front2_not_in_f1:
+            print("example f2_not_in_f1:", front2_not_in_f1[0])
+
+        # If you want the full lists accessible to the caller, return them too.
+        # (Returning them is often more useful than printing only.)
+        return (s1 == s2), front1_not_in_f2, front2_not_in_f1
 
 
 class FiguresTablesToPrint:
