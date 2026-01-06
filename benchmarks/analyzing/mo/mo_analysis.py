@@ -3560,7 +3560,7 @@ class SaveAllResultsCP2025:
                 table_results = self.analysis.average_similar_nqueens_instances(df, non_stats_headers)
             elif problem == "MORCPSP":
                 table_results = self.analysis.average_similar_rcpsp_instances(df, non_stats_headers)
-            elif problem == "sims":
+            elif problem == "SIMS":
                 # todo deal with sims correctly
                 table_results = self.analysis.average_similar_sims_instances(df, non_stats_headers)
             else:
@@ -3872,19 +3872,19 @@ def for_test():
         (
             "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/ukp/saugmecon_gava_gias/mo_saugmecon_gava_gias_solutions_and_stats.csv",
             "MUKP"
-        ),
-        (
-            "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/nqueens/saug_gava_gias_disj/mo_saug_gava_gias_disj_solutions_and_stats.csv",
-            "MN-Queens"
-        ),
-        (
-            "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/saug_gava_disjunctive_gias_10800/mo_saug_gava_disjunctive_gias_18000_solutions_and_stats.csv",
-            "MORCPSP"
-        ),
-        (
-            "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/sims/fix_saug_10800_timeout/mo_fix_saug_10800_timeout_solutions_and_stats.csv",
-            "SIMS"
-        )
+        )  # ,
+        # (
+        #     "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/nqueens/saug_gava_gias_disj/mo_saug_gava_gias_disj_solutions_and_stats.csv",
+        #     "MN-Queens"
+        # ),
+        # (
+        #     "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/saug_gava_disjunctive_gias_10800/mo_saug_gava_disjunctive_gias_18000_solutions_and_stats.csv",
+        #     "MORCPSP"
+        # ),
+        # (
+        #     "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/sims/fix_saug_10800_timeout/mo_fix_saug_10800_timeout_solutions_and_stats.csv",
+        #     "SIMS"
+        # )
     ]
     print_config = FiguresTablesToPrint(
         do_safety_checks=True,
@@ -3900,9 +3900,19 @@ def for_test():
         print_hv_evolution=False
     )
 
-    # strategies = ["GIA", "GIAub", "GIAubL", "DisjProg", "Gavanelli", "Saugmecon", "SaugmeconNoR"]  # example
-    strategies = ["Saugmecon", "SaugmeconNoR"]  # example
-    strategies_styled = Strategies(strategies)
+    strategies = ['GIA', 'GIA_boundedLazy', 'GIA_bounded', 'ParetoGavanelliGlobalConstraint',
+                  'ParetoDisjunctiveProgramming', 'SaugmeconNoR']
+
+    mapping_strategy_names = {
+        "GIA_boundedLazy": "GIAubL",
+        "GIA_bounded": "GIAub",
+        "ParetoGavanelliGlobalConstraint": "Gavanelli",
+        "ParetoDisjunctiveProgramming": "DisjProg",
+        "SaugmeconNoR": "SaugmeconNoR",
+        "GIA": "GIA",
+    }
+    # strategies = ["Saugmecon", "SaugmeconNoR"]  # example
+    strategies_styled = Strategies(strategies, mapping_strategy_names)
 
     runner = SaveAllResultsCP2025(csv_file_path_problem, print_config, strategies_styled)
     figs_paper, data_paper = runner.save_all_results()
