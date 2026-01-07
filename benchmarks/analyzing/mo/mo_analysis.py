@@ -17,7 +17,14 @@ from pymoo.indicators.igd import IGD
 from pymoo.indicators.igd_plus import IGDPlus
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 from pathlib import Path
+from dataclasses import dataclass
+from typing import Optional
 
+@dataclass(frozen=True)
+class StrategySpec:
+    label: str                 # name used in plots/tables
+    source: str                # value in CSV column front_generator
+    query: Optional[str] = None  # pandas query, e.g., "use_lex == True"
 
 # noinspection PyTypeChecker
 def find_closest_time_index_to_time_t(x_all_times, id_times, t):
@@ -3436,22 +3443,38 @@ class SaveAllResultsCP2025:
         df = self.analysis.csv_to_df(csv_path)
         print(f"Processing {csv_path} for problem {problem}")
 
-        current_strategies = set(self.analysis.strategies.strategies_original_name_list)
-        df = df.loc[df[self.analysis.front_strategy].isin(current_strategies)]
+        # current_strategies = set(self.analysis.strategies.strategies_original_name_list)
+        # df = df.loc[df[self.analysis.front_strategy].isin(current_strategies)]
+
+        current_sources = set(self.analysis.strategies.strategies_original_name_list)
+        df = df.loc[df[self.analysis.front_strategy].isin(current_sources)]
+
+        # 2) expand/filter/rename into the *actual* compared strategies
+        df = self.strategies.apply_specs(df, strategy_col=self.analysis.front_strategy)
+
+        # 3) keep only instances where all compared strategies exist
+        if not self.analysis.strategies.all_instances_per_strategy:
+            df = self.keep_only_common_instances(
+                df,
+                instance_col=self.analysis.instance,
+                strategy_col=self.analysis.front_strategy,
+                required_strategies=self.analysis.strategies.strategies_better_name
+            )
 
         figs = {}
         latex_text = ""
         if self.config.print_hv_evolution:
             df = self.add_hv_computed_evolution_if_not_present(df, csv_path)
-        df = self.beautify_strategies_names(df)
+
         print("Safety checks")
         if "sims" in problem.lower():
             df = self.rename_sims_strategies_to_indicate_objectives(df)
 
         if self.config.do_safety_checks:
-            if not self.safety_check_all_instances_same_number_strategies(df):
-                print(f"Safety checks for all instances having the same number of strategies has failed for {csv_path}")
-                return None, None
+            if self.analysis.strategies.all_instances_per_strategy:
+                if not self.safety_check_all_instances_same_number_strategies(df):
+                    print(f"Safety checks for all instances having the same number of strategies has failed for {csv_path}")
+                    return None, None
             if not self.safety_check_exhaustive(df):
                 print(f"Safety checks for exhaustive conditions has failed for {csv_path}")
                 return None, None
@@ -3473,6 +3496,13 @@ class SaveAllResultsCP2025:
         figs, data = self.save_all_figs(df, problem)
         print("Finished processing")
         return figs, data
+
+    def keep_only_common_instances(self, df, instance_col, strategy_col, required_strategies):
+        required = set(required_strategies)
+        present = (df.groupby(instance_col)[strategy_col]
+                   .apply(lambda s: required.issubset(set(s))))
+        keep_instances = present[present].index
+        return df[df[instance_col].isin(keep_instances)].copy()
 
     def add_hv_computed_evolution_if_not_present(self, df, csv_file_path):
         if "hv_computed_evolution" not in df.columns:
@@ -3986,28 +4016,40 @@ class FiguresTablesToPrint:
 
 
 class Strategies:
-    _BASE_MARKERS = ['o', 's', '^', 'D', 'X', '*', 'P', 'v', '>', '<', 'h', 'H', 'd', '8', 'p']
+    def __init__(self, mapping_or_specs):
+        if isinstance(mapping_or_specs, dict):
+            self.specs = [StrategySpec(label=v, source=k, query=None)
+                          for k, v in mapping_or_specs.items()]
+        else:
+            self.specs = list(mapping_or_specs)
 
-    def __init__(self, mapping_strategy_names):
-        self.mapping_strategy_names = mapping_strategy_names
-        strategies = mapping_strategy_names.keys()
-        self.strategies_original_name_list = list(strategies)
-        self.strategies_better_name = self.beautify_strategies_names()
-        self.colors = {}
-        self.markers = {}
-        self.assign_colors()
-        self.assign_markers()
+        self.all_instances_per_strategy = all(getattr(s, "query", None) is None for s in self.specs)
+        self.strategies_original_name_list = list(dict.fromkeys(s.source for s in self.specs))
+        self.strategies_better_name = [s.label for s in self.specs]
 
-    def beautify_strategies_names(self):
-        return [self.mapping_strategy_names.get(s, s) for s in self.strategies_original_name_list]
+        # keep your existing colors/markers logic (just keyed by label now)
+        self.colors = self._build_colors(self.strategies_better_name)
+        self.markers = self._build_markers(self.strategies_better_name)
 
-    def assign_colors(self):
-        self.colors = dict(zip(self.strategies_better_name, sns.color_palette("colorblind", len(self.strategies_better_name))))
+    def _build_colors(self, labels):
+        return dict(zip(labels, sns.color_palette("colorblind", len(labels))))
 
-    def assign_markers(self):
-        markers = list(it.islice(it.cycle(self._BASE_MARKERS), len(self.strategies_better_name)))
-        self.markers = dict(zip(self.strategies_better_name, markers))
+    def _build_markers(self, labels):
+        base = ['o', 's', '^', 'D', 'X', '*', 'P', 'v', '>', '<', 'h', 'H', 'd', '8', 'p']
+        return {lab: base[i % len(base)] for i, lab in enumerate(labels)}
 
+    def apply_specs(self, df, strategy_col="front_generator"):
+        parts = []
+        for s in self.specs:
+            d = df[df[strategy_col] == s.source]
+            if s.query:
+                d = d.query(s.query)
+            d = d.copy()
+            d[strategy_col] = s.label
+            parts.append(d)
+        if not parts:
+            return df.iloc[0:0].copy()
+        return pd.concat(parts, ignore_index=True)
 
 class Cols:
     TIME_FOR_TIME_SCORE = 'time_for_time_score'
@@ -4062,20 +4104,25 @@ def for_test():
         print_sorted_igd_per_strategy=False,
         print_sorted_igd_plus_per_strategy=False,
         print_sorted_normalized_time_per_strategy=True,
-        folder_path="multi-journal-saugmecon-variants",
+        folder_path="debug-and-testing",
         print_hv_evolution=False
     )
 
-    mapping_strategy_names = {
-        "GIA_boundedLazy": "GIAubL",
-        "GIA_bounded": "GIAub",
-        "ParetoGavanelliGlobalConstraint": "Gavanelli",
-        "ParetoDisjunctiveProgramming": "DisjProg",
-        "SaugmeconNoR": "SaugmeconNoR",
-        "GIA": "GIA",
-    }
+    # mapping_strategy_names = {
+    #     "GIA_boundedLazy": "GIAubL",
+    #     "GIA_bounded": "GIAub",
+    #     "ParetoGavanelliGlobalConstraint": "Gavanelli",
+    #     "ParetoDisjunctiveProgramming": "DisjProg",
+    #     "SaugmeconNoR": "SaugmeconNoR",
+    #     "GIA": "GIA",
+    # }
+    strategy_specs = [
+        StrategySpec(label="SAUGMECON-lex", source="SaugmeconNoR", query="lexicographic_opt == True"),
+        StrategySpec(label="SAUGMECON-Reals", source="SaugmeconNoRTestReal"),
+    ]
+
     # strategies = ["Saugmecon", "SaugmeconNoR"]  # example
-    strategies_styled = Strategies(mapping_strategy_names)
+    strategies_styled = Strategies(strategy_specs)
 
     runner = SaveAllResultsCP2025(csv_file_path_problem, print_config, strategies_styled)
     figs_paper, data_paper = runner.save_all_results()
