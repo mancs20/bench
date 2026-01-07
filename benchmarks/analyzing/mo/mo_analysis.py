@@ -18,6 +18,8 @@ from pymoo.indicators.igd_plus import IGDPlus
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 from pathlib import Path
 
+
+# noinspection PyTypeChecker
 def find_closest_time_index_to_time_t(x_all_times, id_times, t):
     for i in range(id_times, len(x_all_times)):
         if x_all_times[i] > t:
@@ -25,6 +27,7 @@ def find_closest_time_index_to_time_t(x_all_times, id_times, t):
     return len(x_all_times) - 1
 
 
+# noinspection PyTypeChecker
 def is_dominated(point, other_point, maximize=True):
     for dimension in range(len(point)):
         if maximize and point[dimension] > other_point[dimension]:
@@ -98,6 +101,7 @@ def get_info_similar_instances_sims():
     return objs_elements, pattern_template
 
 
+# noinspection PyTypeChecker
 def filter_initial_k_points(front, k, maximize=True):
     """
     Removes initial k points if any of them are dominated or duplicated later.
@@ -253,7 +257,9 @@ class MoAnalysis:
         self.strategy_markers = self.strategies.markers
 
     def create_default_strategies(self):
-        default_strategies = ["GIA", "GIAub", "GIAubL", "DisjProg", "Gavanelli", "Saugmecon"]
+        default_strategies = {"GIA":"GIA", "GIA_boundedLazy":"GIAubL", "GIA_bounded":"GIAub",
+                              "ParetoDisjunctiveProgramming":"DisjProg", "ParetoGavanelliGlobalConstraint":"Gavanelli",
+                              "SaugmeconNoR":"Saugmecon"}
         return Strategies(default_strategies)
 
     @staticmethod
@@ -272,6 +278,7 @@ class MoAnalysis:
         min_len = min(len(s) for s in str_values)
 
         common_digits = 0
+        # noinspection PyTypeChecker
         for i in range(min_len):
             chars_at_pos = set(s[i] for s in str_values)
             if len(chars_at_pos) < len(str_values):  # Some agreement
@@ -358,6 +365,7 @@ class MoAnalysis:
         ).tolist()
 
         # Construct LaTeX table
+        # noinspection PyTypeChecker
         latex_table = "\\begin{table}[h]\n\\centering\n\\caption{" + title + "}\n\\begin{tabular}{" + "r" * len(
             table.columns) + "}\n\\hline\n"
 
@@ -729,6 +737,7 @@ class MoAnalysis:
         objs_list.append(objs_elements_mol)
         pattern_list.append(pattern_template_mol)
         table_list = []
+        # noinspection PyTypeChecker
         for i in range(len(objs_list)):
             objs_elements = objs_list[i]
             pattern_template = pattern_list[i]
@@ -797,6 +806,7 @@ class MoAnalysis:
                     df_combined["n"] = elements
                     df_combined["Instances"] = len(df_similar_instances[self.instance].unique())
                     # rename exhaustive column
+                    # noinspection PyTypeChecker
                     df_combined.rename(columns={self.exhaustive: stats[1]}, inplace=True)
 
                     best_table_rows.append(df_combined)
@@ -1101,7 +1111,7 @@ class MoAnalysis:
                 return ['font-weight: bold' if v == s.max() else '' for v in
                         s]  # Always highlight the max in X Best row
             else:
-                is_best = (s == s.max()) if maximize else (s == s.min())
+                is_best: bool = (s == s.max()) if maximize else (s == s.min())
                 return ['font-weight: bold' if v else '' for v in is_best]
 
         # Apply the styling
@@ -3233,6 +3243,152 @@ class MoAnalysis:
 
         return data
 
+    def get_normalized_time_per_strategy_data(self, df, objs_elements, pattern_template, remove_all_timeout_instances=False):
+        df_problem = df.copy()
+        strategies = df_problem[self.front_strategy].unique()
+
+        data = {
+            "objectives": {},
+            "global": {strategy: {"time": []} for strategy in strategies}
+        }
+
+        capped_time = "capped_time"
+        normalized_time = "normalized_time"
+
+        # --- 1) capped_time = min(time, timeout) ---
+        # Make sure time/timeout are numeric (in case they come as strings)
+        df_problem[self.time] = pd.to_numeric(df_problem[self.time], errors="coerce")
+        df_problem[self.timeout] = pd.to_numeric(df_problem[self.timeout], errors="coerce")
+
+        df_problem[capped_time] = np.minimum(df_problem[self.time], df_problem[self.timeout])
+        # If time is NaN -> capped_time should be NaN (np.minimum already does that)
+        # --- OPTIONAL: drop instances where ALL strategies timed out ---
+        if remove_all_timeout_instances:
+            # timed_out row = time >= timeout (ignore NaNs)
+            df_problem["_timed_out"] = (
+                    df_problem[self.time].notna()
+                    & df_problem[self.timeout].notna()
+                    & (df_problem[self.time] >= df_problem[self.timeout])
+            )
+
+            # per instance: True iff every row (strategy) is timed out
+            all_timeout_by_instance = df_problem.groupby(self.instance)["_timed_out"].all()
+
+            # keep only instances that are NOT all-timeout
+            keep_instances = all_timeout_by_instance[~all_timeout_by_instance].index
+            df_problem = df_problem[df_problem[self.instance].isin(keep_instances)].copy()
+
+            df_problem = df_problem.drop(columns=["_timed_out"])
+
+        # --- 2) best (min) capped time per instance across ALL strategies ---
+        instance_min_time = df_problem.groupby(self.instance)[capped_time].min()
+
+        # Guard: if an instance has best time 0, normalization would blow up.
+        # Replace 0 by NaN so we drop those rows (or you can decide another policy).
+        instance_min_time = instance_min_time.replace(0, np.nan)
+
+        for strategy in strategies:
+            strat_df = df_problem[df_problem[self.front_strategy] == strategy].copy()
+            if strat_df.empty:
+                continue
+
+            # Normalize time (lower is better, so >= 1.0, where 1.0 is best)
+            strat_df[normalized_time] = strat_df[capped_time] / strat_df[self.instance].map(instance_min_time)
+            strat_df = strat_df.dropna(subset=[normalized_time, capped_time])
+
+            # ---------- GLOBAL ----------
+            # best on the left: smaller normalized_time first; tie-break by smaller capped_time
+            strat_df_sorted = strat_df.sort_values(by=[normalized_time, capped_time], ascending=[True, True])
+            data["global"][strategy]["time"] = strat_df_sorted[normalized_time].tolist()
+
+            # ---------- PER OBJECTIVE ----------
+            for obj, elements_list in objs_elements.items():
+                pattern_mask = strat_df[self.instance].apply(
+                    lambda x: any(re.search(pattern_template.format(obj=obj, elements=el), x) for el in elements_list)
+                )
+                strat_df_obj = strat_df[pattern_mask].copy()
+                if strat_df_obj.empty:
+                    continue
+
+                strat_df_obj_sorted = strat_df_obj.sort_values(by=[normalized_time, capped_time],
+                                                               ascending=[True, True])
+                normalized_times = strat_df_obj_sorted[normalized_time].tolist()
+
+                if obj not in data["objectives"]:
+                    data["objectives"][obj] = {}
+                data["objectives"][obj][strategy] = {
+                    "time": normalized_times
+                }
+
+        return data
+
+    def plot_normalized_time_per_strategy(self, df, problem_name, objs_elements, pattern_template,
+                                          figs, data=None):
+        strategies = self.fixed_strategies
+        if data is None:
+            data = self.get_normalized_time_per_strategy_data(df, objs_elements, pattern_template)
+
+        for_plotting = data["objectives"]
+
+        # --------- PER OBJECTIVE ----------
+        for obj, obj_data in for_plotting.items():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.set_title(f"{problem_name} - Normalized Time per instance - {obj} objectives", fontsize=16)
+
+            for i, strategy in enumerate(strategies):
+                if strategy not in obj_data:
+                    continue
+                time_sorted = obj_data[strategy]["time"]
+                x = list(range(1, len(time_sorted) + 1))
+
+                ax.plot(x, time_sorted,
+                        label=strategy,
+                        color=self.strategy_colors[strategy],
+                        marker=self.strategy_markers[strategy],
+                        linestyle='-',
+                        markersize=6,
+                        markerfacecolor='none',
+                        linewidth=1.5)
+
+            ax.set_xlabel("Instances (sorted by normalized time)", fontsize=16)
+            ax.set_ylabel("Normalized time", fontsize=14)
+            ax.tick_params(axis='both', labelsize=14)
+            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax.set_yscale("log")
+            plt.tight_layout()
+            figs[f"normalized_time_sorted_per_instance_{problem_name}_{obj}obj"] = fig
+            plt.show()
+
+        # --------- GLOBAL ----------
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title(f"{problem_name} - Normalized Time per instance - All instances", fontsize=16)
+
+        for i, strategy in enumerate(strategies):
+            if strategy not in data["global"]:
+                continue
+            time_sorted = data["global"][strategy]["time"]
+            x = list(range(1, len(time_sorted) + 1))
+
+            ax.plot(x, time_sorted,
+                    label=strategy,
+                    color=self.strategy_colors[strategy],
+                    marker=self.strategy_markers[strategy],
+                    linestyle='-',
+                    markersize=6,
+                    markerfacecolor='none',
+                    linewidth=1.5)
+
+        ax.set_xlabel("Instances (sorted by normalized time)", fontsize=16)
+        ax.set_ylabel("Normalized time", fontsize=14)
+        ax.tick_params(axis='both', labelsize=14)
+        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.set_yscale("log")
+        plt.tight_layout()
+        figs[f"normalized_time_sorted_per_instance_{problem_name}_all"] = fig
+        plt.show()
+
+        return figs
+
     # ------------------------------ End of paper plotting functions ---------------------------------------------------
 
     def set_stats_exhaustive(self, stats_exhaustive, pretty_name):
@@ -3640,6 +3796,10 @@ class SaveAllResultsCP2025:
         if self.config.print_sorted_igd_plus_per_strategy:
             data['igd_plus'] = self.analysis.compute_igd_plus_per_strategy(df, problem, objs_elements, pattern_template)
             figs = self.analysis.plot_igd_plus_per_strategy(df, problem, objs_elements, pattern_template, figs, data['igd_plus'])
+        if self.config.print_sorted_normalized_time_per_strategy:
+            data['time_per_strategy'] = self.analysis.get_normalized_time_per_strategy_data(df, objs_elements, pattern_template)
+            figs = self.analysis.plot_normalized_time_per_strategy(df, problem, objs_elements, pattern_template,
+                                                                   figs, data['time_per_strategy'])
 
         if figs:
             import os
@@ -3765,6 +3925,7 @@ class FiguresTablesToPrint:
             print_sorted_contribution_per_strategy=True,
             print_sorted_igd_per_strategy=True,
             print_sorted_igd_plus_per_strategy=True,
+            print_sorted_normalized_time_per_strategy=True,
             folder_path="cp2025",
             print_hv_evolution=False
     ):
@@ -3777,6 +3938,7 @@ class FiguresTablesToPrint:
         self.print_sorted_contribution_per_strategy = print_sorted_contribution_per_strategy
         self.print_sorted_igd_per_strategy = print_sorted_igd_per_strategy
         self.print_sorted_igd_plus_per_strategy = print_sorted_igd_plus_per_strategy
+        self.print_sorted_normalized_time_per_strategy = print_sorted_normalized_time_per_strategy
         self.folder_path = folder_path
         self.print_hv_evolution = print_hv_evolution
         self.print_config_lines()
@@ -3792,7 +3954,8 @@ class FiguresTablesToPrint:
                 f"sorted_normalized_hv_per_strategy={self.print_sorted_normalized_hv_per_strategy},"
                 f"sorted_contribution_hv_per_strategy={self.print_sorted_contribution_per_strategy},"
                 f"print_sorted_igd_per_strategy={self.print_sorted_igd_per_strategy},"
-                f"print_sorted_igd_plus_per_strategy={self.print_sorted_igd_plus_per_strategy}")
+                f"print_sorted_igd_plus_per_strategy={self.print_sorted_igd_plus_per_strategy},"
+                f"print_sorted_normalized_time_per_strategy={self.print_sorted_normalized_time_per_strategy},")
 
     def print_config_lines(self):
         def symbol(value, is_safety=False):
@@ -3816,6 +3979,8 @@ class FiguresTablesToPrint:
             f"{symbol(self.print_sorted_igd_per_strategy)} Print sorted IGD per strategy: {self.print_sorted_igd_per_strategy}")
         print(
             f"{symbol(self.print_sorted_igd_plus_per_strategy)} Print sorted IGD+ per strategy: {self.print_sorted_igd_plus_per_strategy}")
+        print(
+            f"{symbol(self.print_sorted_normalized_time_per_strategy)} Print sorted normalized time per strategy: {self.print_sorted_normalized_time_per_strategy}")
         print(f"Folder path: {self.folder_path}")
         print("")  # Just a clean newline
 
@@ -3887,21 +4052,19 @@ def for_test():
         # )
     ]
     print_config = FiguresTablesToPrint(
-        do_safety_checks=True,
+        do_safety_checks=False,
         print_time_vs_instances=False,
         print_cumulative_hv=False,
         print_hv_histogram=False,
-        print_latex_tables=True,
-        print_sorted_normalized_hv_per_strategy=True,
-        print_sorted_contribution_per_strategy=True,
+        print_latex_tables=False,
+        print_sorted_normalized_hv_per_strategy=False,
+        print_sorted_contribution_per_strategy=False,
         print_sorted_igd_per_strategy=False,
-        print_sorted_igd_plus_per_strategy=True,
+        print_sorted_igd_plus_per_strategy=False,
+        print_sorted_normalized_time_per_strategy=True,
         folder_path="multi-journal-saugmecon-variants",
         print_hv_evolution=False
     )
-
-    strategies = ['GIA', 'GIA_boundedLazy', 'GIA_bounded', 'ParetoGavanelliGlobalConstraint',
-                  'ParetoDisjunctiveProgramming', 'SaugmeconNoR']
 
     mapping_strategy_names = {
         "GIA_boundedLazy": "GIAubL",
@@ -3912,7 +4075,7 @@ def for_test():
         "GIA": "GIA",
     }
     # strategies = ["Saugmecon", "SaugmeconNoR"]  # example
-    strategies_styled = Strategies(strategies, mapping_strategy_names)
+    strategies_styled = Strategies(mapping_strategy_names)
 
     runner = SaveAllResultsCP2025(csv_file_path_problem, print_config, strategies_styled)
     figs_paper, data_paper = runner.save_all_results()
