@@ -212,12 +212,14 @@ def set_general_plot_style():
 
 class MoAnalysis:
 
-    def __init__(self, strategies=None, benchmark='benchmark', problem='problem', instance='instance', solver_name='solver',
+    def __init__(self, strategies=None, calculate_std=True, benchmark='benchmark', problem='problem', instance='instance', solver_name='solver',
                  front_strategy='front_generator',
                  hypervolume='hypervolume', pareto_front='pareto_front',
                  hypervolume_evolution='hypervolume_evolution', number_of_solutions='front_cardinality',
                  exhaustive='exhaustive', time='time(s)', solutions_in_time='solutions_in_time',
                  time_solver_sec=None, pareto_solutions_time_list=None, all_solutions='all_solutions'):
+        self.calculate_std = calculate_std
+        self.joining_latex_string_avg_std = "\\pm "
         self.benchmark = benchmark
         self.problem = problem
         self.hypervolume = hypervolume
@@ -317,7 +319,12 @@ class MoAnalysis:
 
     @staticmethod
     def disjunctive_paper_style_format_row_latex(row, list_header_rows, minimize=True):
-        """Format a LaTeX row, making the minimum per stat column bold."""
+        """
+        Format a LaTeX row, making the best MEAN per metric bold.
+        If std columns exist, they must be in the 2nd level of the MultiIndex with suffix '_std'
+        (e.g., ('SAUGMECON-RealS', 'time(s)_std')).
+        Std cells are formatted but never bolded (bolding is decided by mean only).
+        """
         formatted_row = []
 
         data_columns_start_pos = len(list_header_rows)
@@ -327,6 +334,8 @@ class MoAnalysis:
         stats_columns = {}
         for col in row.index[data_columns_start_pos:]:
             stat_name = col[1]  # Second level of MultiIndex (e.g., "time(s)")
+            if isinstance(stat_name, str) and stat_name.endswith("_std"):
+                continue  # do not include std columns in the "min/max per stat" logic
             if stat_name not in stats_columns:
                 stats_columns[stat_name] = []
             stats_columns[stat_name].append(col)
@@ -339,23 +348,53 @@ class MoAnalysis:
             else:
                 values_per_stat_to_highlight[stat] = numeric_values[columns].max(skipna=True)
 
+        # Joining string for mean+std (fallback if not defined)
+        join_str = getattr(MoAnalysis, "joining_latex_string_avg_std", "\\pm ")
+        # # close_str = "" if (")" in join_str or "\\pm" in join_str) else ")"
+
         # Format row values
         for col, value in zip(row.index, row):
+            # Do not print std columns as separate columns (they will be merged into the mean cell)
+            if col in row.index[data_columns_start_pos:]:
+                stat_name = col[1]
+                if isinstance(stat_name, str) and stat_name.endswith("_std"):
+                    continue
+
             if is_number(value) and not pd.isna(value):  # skip np.nan
                 num_value = float(value)
                 # Get values for this stat if available, otherwise use just the current number
                 column_values = numeric_values[stats_columns[col[1]]] if col[1] in stats_columns else [num_value]
-                formatted_value = (
-                    f"${MoAnalysis.format_number_dynamic(num_value, column_values, base_precision=8, min_precision=2)}$"
-                )
-                # Apply bold if this value is the lowest for its stat
+                # formatted_value = (
+                #     f"${MoAnalysis.format_number_dynamic(num_value, column_values, base_precision=8, min_precision=2)}$"
+                # )
+                mean_str = MoAnalysis.format_number_dynamic(num_value, column_values, base_precision=8, min_precision=2)
+
+                # Attach std if available
+                std_col = (col[0], f"{col[1]}_std")
+                if std_col in row.index:
+                    std_raw = row[std_col]
+                    if is_number(std_raw) and not pd.isna(std_raw):
+                        std_val = float(std_raw)
+                        std_str = MoAnalysis.format_number_dynamic(
+                            std_val, [std_val], base_precision=2, min_precision=2
+                        )
+                        cell_content = f"{mean_str}{join_str}{std_str}"
+                    else:
+                        cell_content = f"{mean_str}"
+                else:
+                    cell_content = f"{mean_str}"
+
+                formatted_value = f"${cell_content}$"
+
+                # Apply bold if this MEAN is the best for its stat
                 stat_name = col[1]
                 if stat_name not in ["NaN", "nan", None] and num_value == values_per_stat_to_highlight.get(stat_name,
                                                                                                            None):
-                    formatted_value = f"$\\mathbf{{{formatted_value.strip('$')}}}$" if col[0] != "" else formatted_value
-                else:
-                    formatted_value = f"{formatted_value}"
+                    formatted_value = f"$\\mathbf{{{cell_content}}}$" if col[0] != "" else formatted_value
+
                 formatted_row.append(formatted_value)
+            elif isinstance(value, str) and join_str in value:
+                formatted_row.append(f"${value}$")
             else:
                 formatted_row.append("-" if pd.isna(value) else str(value))
 
@@ -370,6 +409,11 @@ class MoAnalysis:
             lambda row: MoAnalysis.disjunctive_paper_style_format_row_latex(row, header_columns_list, minimize),
             axis=1
         ).tolist()
+
+        # remove columns with _std
+        for col in table.columns:
+            if isinstance(col[1], str) and col[1].endswith("_std"):
+                table = table.drop(columns=col)
 
         # Construct LaTeX table
         # noinspection PyTypeChecker
@@ -1920,17 +1964,35 @@ class MoAnalysis:
             agg_dict["exhaustive"] = "sum"
         grouped_df = df_filtered.groupby(self.front_strategy, as_index=False).agg(agg_dict)
 
+        if self.calculate_std:
+            std_cols = [c for c in stats_depending_exhaustive if not (not is_exhaustive and c == "exhaustive")]
+            agg_std = {col: "std" for col in std_cols}
+            grouped_std = df_filtered.groupby(self.front_strategy, as_index=False).agg(agg_std)
+            for col in std_cols:
+                grouped_df[f"{col}_std"] = grouped_std[col]
+
         # Handle front_cardinality only for exhaustive cases
         if is_exhaustive:
-            average_number_pareto_optimal = grouped_df["front_cardinality"].iloc[0]
+            # average_number_pareto_optimal = grouped_df["front_cardinality"].iloc[0]
+            average_number_pareto_optimal = round(float(grouped_df["front_cardinality"].iloc[0]), 2)
             del grouped_df["front_cardinality"]
+
+            if self.calculate_std:
+                # std_number_pareto_optimal = grouped_df["front_cardinality_std"].iloc[0]
+                std_number_pareto_optimal = round(float(grouped_df["front_cardinality_std"].iloc[0]), 2)
+                del grouped_df["front_cardinality_std"]
             # Rename columns
             if "p" in non_stats_headers and is_exhaustive:
+                if self.calculate_std:
+                    average_number_pareto_optimal = (f"{average_number_pareto_optimal}{self.joining_latex_string_avg_std}"
+                                                     f"{std_number_pareto_optimal}")
                 grouped_df["p"] = average_number_pareto_optimal
             stats_depending_exhaustive.remove("front_cardinality")
 
         for i, stat in enumerate(stats_depending_exhaustive):
             grouped_df.rename(columns={stat: stats_pretty_name_depending_exhaustive[i]}, inplace=True)
+            if self.calculate_std:
+                grouped_df.rename(columns={f"{stat}_std": f"{stats_pretty_name_depending_exhaustive[i]}_std"}, inplace=True)
 
         # Add metadata columns
         grouped_df["K"] = obj
@@ -2096,6 +2158,9 @@ class MoAnalysis:
         return exhaustive_df, non_exhaustive_df
 
     def create_data_frame_pretty_table_like_disjunctive_paper(self, exhaustive_df, stats_columns, non_stats_headers):
+        std_columns = [f"{col}_std" for col in stats_columns if f"{col}_std" in exhaustive_df.columns]
+        stats_columns = stats_columns + std_columns
+
         strategies = exhaustive_df[self.front_strategy].unique()
         column_tuples = []
         for header in non_stats_headers:
@@ -4098,7 +4163,7 @@ def for_test():
         print_time_vs_instances=False,
         print_cumulative_hv=False,
         print_hv_histogram=False,
-        print_latex_tables=False,
+        print_latex_tables=True,
         print_sorted_normalized_hv_per_strategy=False,
         print_sorted_contribution_per_strategy=False,
         print_sorted_igd_per_strategy=False,
