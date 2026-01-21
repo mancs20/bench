@@ -1396,52 +1396,216 @@ class MoAnalysis:
 
         return figs
 
-    def plot_fronts(self, df, instances_list, figs):
-        df_copy = df.copy()
-        df_copy['solver_strategy'] = df_copy[[self.solver_name, self.front_strategy]].agg(' '.join, axis=1)
+    def plot_fronts(self, df, instances_list, figs,
+                    plot_reference_front=False):
+        """
+        For each instance, plot all strategies' fronts in the same figure.
+        Assumes df is already in the final strategy naming you want to show.
+
+        - Uses Strategies order/markers/colors if self.strategies exists and provides them.
+        - Legend: '<strategy> - <n> points' plus '*' if exhaustive.
+        - plot_reference_front:
+            if an exhaustive front exists -> use it as reference,
+            else -> build joint non-dominated union and plot as hollow black circles.
+        """
+
+        import ast
+        import numpy as np
+        import pandas as pd
+        import matplotlib.pyplot as plt
+
+        def _parse_front(v):
+            if pd.isna(v):
+                return None
+            if isinstance(v, (list, tuple)):
+                return list(v)
+            if isinstance(v, str):
+                s = v.strip()
+                if s.startswith("{") and s.endswith("}"):
+                    s = s.replace("{", "[").replace("}", "]")
+                try:
+                    return ast.literal_eval(s)
+                except (SyntaxError, ValueError):
+                    return None
+            return None
+
+        # order + style from Strategies (labels)
+        if hasattr(self, "strategies") and self.strategies is not None:
+            strategies_order = [s for s in self.strategies.strategies_better_name
+                                if s in set(df[self.front_strategy].unique())]
+            colors = self.strategies.colors
+            markers = self.strategies.markers
+        else:
+            strategies_order = list(df[self.front_strategy].unique())
+            colors = getattr(self, "strategy_colors", {})
+            markers = getattr(self, "strategy_markers", {})
 
         generic_key = "pareto_front"
+
         for instance_to_process in instances_list:
-            filtered_df = df_copy[df_copy[self.instance] == instance_to_process]
+            df_inst = df[df[self.instance] == instance_to_process]
+            if df_inst.empty:
+                continue
 
-            # get the problem name
-            problem_for_instance_list = filtered_df[self.problem].unique()
-            if len(problem_for_instance_list) != 1:
+            # problem name (for key/title)
+            problem_vals = df_inst[self.problem].dropna().unique()
+            if len(problem_vals) != 1:
                 raise ValueError(f"More than one problem for instance {instance_to_process} or no problem at all")
-            problem_for_instance = problem_for_instance_list[0]
-            name_plot = f"{problem_for_instance}-{instance_to_process}"
+            problem_name = problem_vals[0]
+            name_plot = f"{problem_name}-{instance_to_process}"
 
-            fig, ax = plt.subplots(figsize=(10, 6))
+            # determine dimension from first parsable front
+            dim = None
+            for _, r in df_inst.iterrows():
+                pts = _parse_front(r.get(self.pareto_front, None))
+                if pts:
+                    dim = len(pts[0])
+                    break
+            if dim is None or dim > 3 or dim < 2:
+                continue
 
-            for _, row in filtered_df.iterrows():
-                solver_strategy = row['solver_strategy']
-                pareto_front_str = row[self.pareto_front]
+            if dim == 3:
+                # fig = plt.figure(figsize=(12, 7))
+                fig = plt.figure(figsize=(10, 6))
+                ax = fig.add_subplot(111, projection="3d")
+            else:
+                fig, ax = plt.subplots(figsize=(10, 6))
 
-                # Parse the pareto_front field
-                if pareto_front_str.startswith('{') and pareto_front_str.endswith('}'):
-                    pareto_front_str = pareto_front_str.replace('{', '[').replace('}', ']')
-
+            # determine maximize/minimize (only needed for joint front)
+            maximize = False
+            if plot_reference_front:
                 try:
-                    pareto_front = ast.literal_eval(pareto_front_str)
-                except (SyntaxError, ValueError) as e:
-                    print(f"Error parsing pareto_front for {solver_strategy}: {e}")
+                    row0 = df_inst.iloc[0]
+                    ref_point = row0.get("reference_point", None)
+                    front0 = _parse_front(row0.get(self.pareto_front, None))
+                    if isinstance(ref_point, str):
+                        ref_point = ast.literal_eval(ref_point)
+                    if front0:
+                        maximize = is_maximization_problem(front0, ref_point)
+                except Exception:
+                    maximize = False
+
+            # plot each strategy
+            for strategy in strategies_order:
+                df_s = df_inst[df_inst[self.front_strategy] == strategy]
+                if df_s.empty:
                     continue
 
-                exhaustive_star = ''
-                if row[self.exhaustive]:
-                    exhaustive_star = '*'
-                label = f"{solver_strategy} - {len(pareto_front)} points{exhaustive_star}"
-                pareto_front = np.array(pareto_front)
-                ax.scatter(pareto_front[:, 0], pareto_front[:, 1], label=label)
+                pts_all = []
+                exhaustive_flag = False
 
-            ax.set_xlabel('Objective 1')
-            ax.set_ylabel('Objective 2')
-            ax.set_title(f'Pareto fronts for instance {name_plot}')
-            ax.legend(title='Solver strategy', bbox_to_anchor=(1.05, 1), loc='upper left')
-            ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
+                for _, r in df_s.iterrows():
+                    pts = _parse_front(r.get(self.pareto_front, None))
+                    if pts:
+                        pts_all.extend(pts)
+                    if bool(r.get(self.exhaustive, False)):
+                        exhaustive_flag = True
+
+                if not pts_all:
+                    continue
+
+                # unique points
+                pts_all = list({tuple(p) for p in pts_all})
+                pts_arr = np.array(pts_all)
+
+                star = "*" if exhaustive_flag else ""
+                label = f"{strategy} - {len(pts_all)} points{star}"
+
+                c = colors.get(strategy, None)
+                m = markers.get(strategy, "o")
+
+                if dim == 3:
+                    ax.scatter(pts_arr[:, 0], pts_arr[:, 1], pts_arr[:, 2],
+                               label=label,
+                               marker=m,
+                               s=28,
+                               facecolors="none",
+                               edgecolors=c if c is not None else None,
+                               linewidths=1.0)
+                else:
+                    ax.scatter(pts_arr[:, 0], pts_arr[:, 1],
+                               label=label,
+                               marker=m,
+                               s=28,
+                               facecolors="none",
+                               edgecolors=c if c is not None else None,
+                               linewidths=1.0)
+
+            # reference / joint front
+            if plot_reference_front:
+                ref_pts = None
+
+                # exhaustive front if exists
+                df_exh = df_inst[df_inst.get(self.exhaustive, False) == True]
+                for _, r in df_exh.iterrows():
+                    pts = _parse_front(r.get(self.pareto_front, None))
+                    if pts:
+                        ref_pts = pts
+                        break
+
+                # else joint
+                if ref_pts is None:
+                    all_points = set()
+                    for _, r in df_inst.iterrows():
+                        pts = _parse_front(r.get(self.pareto_front, None))
+                        if not pts:
+                            continue
+                        for p in pts:
+                            all_points.add(tuple(p))
+                    all_points = list(all_points)
+                    if all_points:
+                        ref_pts = MoAnalysis.remove_dominated_points(all_points, maximize)
+
+                if ref_pts:
+                    ref_pts = list({tuple(p) for p in ref_pts})
+                    ref_arr = np.array(ref_pts)
+                    ref_label = f"Reference - {len(ref_pts)} points"
+
+                    if dim == 3:
+                        ax.scatter(ref_arr[:, 0], ref_arr[:, 1], ref_arr[:, 2],
+                                   label=ref_label,
+                                   marker="o",
+                                   s=90,
+                                   facecolors="none",
+                                   edgecolors="black",
+                                   linewidths=1.4)
+                    else:
+                        ax.scatter(ref_arr[:, 0], ref_arr[:, 1],
+                                   label=ref_label,
+                                   marker="o",
+                                   s=90,
+                                   facecolors="none",
+                                   edgecolors="black",
+                                   linewidths=1.4)
+
+            # labels / legend / grid
+            if dim == 3:
+                ax.set_xlabel("Objective 1")
+                ax.set_ylabel("Objective 2")
+                ax.set_zlabel("Objective 3")
+            else:
+                ax.set_xlabel("Objective 1")
+                ax.set_ylabel("Objective 2")
+                ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+
+            # ax.set_title(f"Pareto fronts for instance {name_plot}", fontsize=16)
+            ax.set_title(f"{name_plot}", fontsize=16)
+
+            ax.legend(bbox_to_anchor=(1.05, 1),
+                      loc="upper left",
+                      frameon=True,
+                      fontsize=9,  # smaller, since you add #points/*
+                      markerscale=0.9,
+                      labelspacing=0.25,
+                      handletextpad=0.5,
+                      borderaxespad=0.3)
+
+            if dim == 3:
+                fig.subplots_adjust(left=0, right=0.9, top=0.90, bottom=0.05)
+            else:
+                fig.subplots_adjust(right=0.75)
             plt.show()
-            fig_key = f"{generic_key}_{name_plot}"
-            figs[fig_key] = fig
+            figs[f"{generic_key}_{name_plot}"] = fig
 
         return figs
 
@@ -4036,6 +4200,52 @@ class SaveAllResultsCP2025:
         # If you want the full lists accessible to the caller, return them too.
         # (Returning them is often more useful than printing only.)
         return (s1 == s2), front1_not_in_f2, front2_not_in_f1
+
+    def plot_pareto_fronts(self, problem_name, plot_reference_front=False, instances_list=None):
+        for csv_path, problem in self.csv_paths_problem:
+            if problem == problem_name:
+                problem_path = csv_path
+                break
+        else:
+            raise ValueError(f"Problem name '{problem_name}' not found in csv paths")
+
+        df_front = self.analysis.csv_to_df(problem_path)
+
+        # --- SAME PIPELINE AS save_results() ---
+
+        # 1) keep only sources that MoAnalysis knows about
+        current_sources = set(self.analysis.strategies.strategies_original_name_list)
+        df_front = df_front.loc[df_front[self.analysis.front_strategy].isin(current_sources)]
+
+        # 2) expand/filter/rename into the compared strategies (better names)
+        df_front = self.strategies.apply_specs(df_front, strategy_col=self.analysis.front_strategy)
+
+        # 3) keep only instances where all compared strategies exist
+        if not self.analysis.strategies.all_instances_per_strategy:
+            df_front = self.keep_only_common_instances(
+                df_front,
+                instance_col=self.analysis.instance,
+                strategy_col=self.analysis.front_strategy,
+                required_strategies=self.analysis.strategies.strategies_better_name
+            )
+
+        # default: all instances
+        if instances_list is None:
+            instances_list = df_front[self.analysis.instance].unique()
+            # delete below it is only for testing
+            instances_list = [instances_list[5]]
+            # instances_list = [instances_list[28]]
+
+        figs = {}
+        return self.analysis.plot_fronts(
+            df_front,
+            instances_list,
+            figs,
+            #strategies_styled=self.strategies,
+            plot_reference_front=plot_reference_front
+        )
+        # for saving:
+        # fig.savefig(path, bbox_inches="tight")
 
 
 class FiguresTablesToPrint:
