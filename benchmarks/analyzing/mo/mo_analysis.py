@@ -2772,11 +2772,7 @@ class MoAnalysis:
                         markerfacecolor='none',  # Unfilled marker
                         linewidth=1.5)
 
-            ax.set_xlabel("Instances (sorted by normalized HV)", fontsize=16)
-            ax.set_ylabel("Normalized HV", fontsize=14)
-            ax.tick_params(axis='both', labelsize=14)
-            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-            plt.tight_layout()
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by normalized HV)", ylabel="Normalized HV")
             figs[f"normalized_hv_sorted_per_instance_{problem_name}_{obj}obj"] = fig
             plt.show()
 
@@ -2799,11 +2795,7 @@ class MoAnalysis:
                     markerfacecolor='none',
                     linewidth=1.5)
 
-        ax.set_xlabel("Instances (sorted by normalized HV)", fontsize=16)
-        ax.set_ylabel("Normalized HV", fontsize=14)
-        ax.tick_params(axis='both', labelsize=14)
-        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
+        self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by normalized HV)", ylabel="Normalized HV")
         figs[f"normalized_hv_sorted_per_instance_{problem_name}_all"] = fig
         plt.show()
 
@@ -2886,12 +2878,8 @@ class MoAnalysis:
                         markerfacecolor='none',  # Unfilled marker
                         linewidth=1.5)
 
-            ax.set_xlabel("Instances (sorted by contribution)", fontsize=16)
-            ax.set_ylabel("Contribution to joint front", fontsize=14)
-            ax.set_ylim(0, 1.05)
-            ax.tick_params(axis='both', labelsize=14)
-            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-            plt.tight_layout()
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by contribution)",
+                                          ylabel="Contribution to joint front", ylim=[0, 1.05])
             figs[f"normalized_contribution_sorted_{problem_name}_{obj}obj"] = fig
             plt.show()
 
@@ -2915,12 +2903,8 @@ class MoAnalysis:
                     markerfacecolor='none',
                     linewidth=1.5)
 
-        ax.set_xlabel("Instances (sorted by contribution)", fontsize=16)
-        ax.set_ylabel("Contribution to joint front", fontsize=14)
-        ax.set_ylim(0, 1.05)
-        ax.tick_params(axis='both', labelsize=14)
-        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
+        self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by contribution)",
+                                      ylabel="Contribution to joint front", ylim=[0, 1.05])
         figs[f"normalized_contribution_sorted_{problem_name}_all"] = fig
         plt.show()
 
@@ -3043,11 +3027,8 @@ class MoAnalysis:
                         markerfacecolor='none',
                         linewidth=1.5)
 
-            ax.set_xlabel("Instances (sorted by IGD)", fontsize=16)
-            ax.set_ylabel("IGD", fontsize=14)
-            ax.tick_params(axis='both', labelsize=14)
-            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-            plt.tight_layout()
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by IGD)",
+                                          ylabel="IGD")
             figs[f"igd_sorted_per_instance_{problem_name}_{obj}obj"] = fig
             plt.show()
 
@@ -3071,11 +3052,8 @@ class MoAnalysis:
                     markerfacecolor='none',
                     linewidth=1.5)
 
-        ax.set_xlabel("Instances (sorted by IGD)", fontsize=16)
-        ax.set_ylabel("IGD", fontsize=14)
-        ax.tick_params(axis='both', labelsize=14)
-        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
+        self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by IGD)",
+                                      ylabel="IGD")
         figs[f"igd_sorted_per_instance_{problem_name}_all"] = fig
         plt.show()
 
@@ -3170,7 +3148,7 @@ class MoAnalysis:
     def plot_igd_plus_per_strategy(self, df, problem_name, objs_elements, pattern_template, figs, data=None):
         strategies = self.fixed_strategies
         if data is None:
-            data = self.compute_igd_per_strategy(df, problem_name, objs_elements, pattern_template)
+            data = self.compute_igd_plus_per_strategy(df, problem_name, objs_elements, pattern_template)
 
         for_plotting = data["objectives"]
 
@@ -3195,11 +3173,8 @@ class MoAnalysis:
                         markerfacecolor='none',
                         linewidth=1.5)
 
-            ax.set_xlabel("Instances (sorted by IGD+)", fontsize=16)
-            ax.set_ylabel("IGD+", fontsize=14)
-            ax.tick_params(axis='both', labelsize=14)
-            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-            plt.tight_layout()
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by IGD+)",
+                                          ylabel="IGD+")
             figs[f"igd_plus_sorted_per_instance_{problem_name}_{obj}obj"] = fig
             plt.show()
 
@@ -3223,11 +3198,8 @@ class MoAnalysis:
                     markerfacecolor='none',
                     linewidth=1.5)
 
-        ax.set_xlabel("Instances (sorted by IGD+)", fontsize=16)
-        ax.set_ylabel("IGD+", fontsize=14)
-        ax.tick_params(axis='both', labelsize=14)
-        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
+        self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by IGD+)",
+                                      ylabel="IGD+")
         figs[f"igd_plus_sorted_per_instance_{problem_name}_all"] = fig
         plt.show()
 
@@ -3315,6 +3287,10 @@ class MoAnalysis:
 
         return data
 
+    # -------------------------------------------------------------------------------------------------------------------
+    # ----------------- Normalized Time per strategy -------------------------------------------------------------------
+    # -------------------------------------------------------------------------------------------------------------------
+
     def get_normalized_time_per_strategy_data(self, df, objs_elements, pattern_template, remove_all_timeout_instances=False):
         df_problem = df.copy()
         strategies = df_problem[self.front_strategy].unique()
@@ -3395,7 +3371,7 @@ class MoAnalysis:
         return data
 
     def plot_normalized_time_per_strategy(self, df, problem_name, objs_elements, pattern_template,
-                                          figs, data=None):
+                                          figs, data=None, log_threshold=50):
         strategies = self.fixed_strategies
         if data is None:
             data = self.get_normalized_time_per_strategy_data(df, objs_elements, pattern_template)
@@ -3407,10 +3383,13 @@ class MoAnalysis:
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.set_title(f"{problem_name} - Normalized Time per instance - {obj} objectives", fontsize=16)
 
+            # Collect exactly the y-values that will be plotted in this figure
+            all_vals = []
             for i, strategy in enumerate(strategies):
                 if strategy not in obj_data:
                     continue
                 time_sorted = obj_data[strategy]["time"]
+                all_vals.extend(time_sorted)
                 x = list(range(1, len(time_sorted) + 1))
 
                 ax.plot(x, time_sorted,
@@ -3422,12 +3401,10 @@ class MoAnalysis:
                         markerfacecolor='none',
                         linewidth=1.5)
 
-            ax.set_xlabel("Instances (sorted by normalized time)", fontsize=16)
-            ax.set_ylabel("Normalized time", fontsize=14)
-            ax.tick_params(axis='both', labelsize=14)
-            ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-            ax.set_yscale("log")
-            plt.tight_layout()
+            # log scale only if max/min >= log_threshold, and set readable ticks
+            self.apply_y_scale_and_ticks(ax, all_vals, log_threshold=log_threshold)
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by normalized time)",
+                                          ylabel="Normalized time")
             figs[f"normalized_time_sorted_per_instance_{problem_name}_{obj}obj"] = fig
             plt.show()
 
@@ -3435,10 +3412,13 @@ class MoAnalysis:
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.set_title(f"{problem_name} - Normalized Time per instance - All instances", fontsize=16)
 
+        # collect exactly the y-values that will be plotted in this figure
+        all_vals = []
         for i, strategy in enumerate(strategies):
             if strategy not in data["global"]:
                 continue
             time_sorted = data["global"][strategy]["time"]
+            all_vals.extend(time_sorted)
             x = list(range(1, len(time_sorted) + 1))
 
             ax.plot(x, time_sorted,
@@ -3450,16 +3430,52 @@ class MoAnalysis:
                     markerfacecolor='none',
                     linewidth=1.5)
 
-        ax.set_xlabel("Instances (sorted by normalized time)", fontsize=16)
-        ax.set_ylabel("Normalized time", fontsize=14)
-        ax.tick_params(axis='both', labelsize=14)
-        ax.legend(title="Strategy", bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax.set_yscale("log")
-        plt.tight_layout()
+        # log scale only if max/min >= log_threshold, and set readable ticks
+        self.apply_y_scale_and_ticks(ax, all_vals, log_threshold=log_threshold)
+        self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by normalized time)",
+                                      ylabel="Normalized time")
         figs[f"normalized_time_sorted_per_instance_{problem_name}_all"] = fig
         plt.show()
 
         return figs
+
+    def apply_y_scale_and_ticks(self, ax, all_vals, log_threshold=50, tick_multipliers=(1, 2, 5)):
+        use_log = False
+        vals = np.array(all_vals, dtype=float)
+        vals = vals[np.isfinite(vals) & (vals > 0)]
+        if vals.size > 0:
+            use_log = (vals.max() / vals.min()) >= log_threshold
+
+        if use_log:
+            ax.set_yscale("log")  # base 10 default
+            maxv = vals.max()
+            ticks = []
+            for k in range(0, int(np.ceil(np.log10(maxv))) + 1):
+                ticks.extend([m * (10 ** k) for m in tick_multipliers])
+            ticks = [t for t in ticks if 1 <= t <= maxv * 1.0001]
+            if len(ticks) >= 2:
+                ax.set_yticks(ticks)
+
+    def finalize_plot_for_screen(self, fig, ax, xlabel, ylabel,
+                                 ylim=None,
+                                 legend_title="Strategy",
+                                 legend_loc="upper left",
+                                 legend_bbox_to_anchor=(1.05, 1),
+                                 add_grid=False):
+        ax.set_xlabel(xlabel, fontsize=16)
+        ax.set_ylabel(ylabel, fontsize=14)
+
+        if ylim is not None:
+            ax.set_ylim(ylim[0], ylim[1])
+
+        ax.tick_params(axis='both', labelsize=14)
+
+        if add_grid:
+            ax.grid(True, which='both')
+
+        ax.legend(title=legend_title, bbox_to_anchor=legend_bbox_to_anchor, loc=legend_loc)
+
+        fig.tight_layout()
 
     # ------------------------------ End of paper plotting functions ---------------------------------------------------
 
@@ -3703,6 +3719,9 @@ class SaveAllResultsCP2025:
         print(f"Saved exhaustive issues details to: {out_path}")
 
     def safety_check_fronts(self, df):
+        if df.empty:
+            print("DataFrame is empty, skipping problem.")
+            return False
         row = df.iloc[0]
         ref_point = row["reference_point"]
         ref_point = ast.literal_eval(ref_point)
@@ -3894,7 +3913,7 @@ class SaveAllResultsCP2025:
         if self.config.print_sorted_normalized_time_per_strategy:
             data['time_per_strategy'] = self.analysis.get_normalized_time_per_strategy_data(df, objs_elements, pattern_template)
             figs = self.analysis.plot_normalized_time_per_strategy(df, problem, objs_elements, pattern_template,
-                                                                   figs, data['time_per_strategy'])
+                                                                   figs, data['time_per_strategy'], self.config.log_threshold)
 
         if figs:
             import os
@@ -3913,6 +3932,8 @@ class SaveAllResultsCP2025:
                     plot_type = "hv"
                 elif "normalized_contribution_sorted" in name:
                     plot_type = "hv_contribution"
+                elif "time_sorted_per_instance" in name:
+                    plot_type = "time"
                 else:
                     plot_type = None
                 fig = self.clean_figure_for_paper(fig, plot_type)
@@ -3939,18 +3960,27 @@ class SaveAllResultsCP2025:
             # Adjust legend
             legend = ax.get_legend()
             if legend:
-                legend.set_title("")
-                for text in legend.get_texts():
-                    text.set_fontfamily('serif')
-                    text.set_fontsize(24)
-
-                # Legend position by plot type
-                if plot_type in ["igd", "igd_plus"]:
-                    ax.legend(loc='upper left', frameon=True)
+                # Legend position by plot type + compact sizing
+                if plot_type in ["igd", "igd_plus", "time"]:
+                    ax.legend(loc='upper left', frameon=True,
+                              handlelength=1.6, markerscale=0.8,
+                              handletextpad=0.6, labelspacing=0.3, borderaxespad=0.3)
                 elif plot_type in ["hv", "hv_contribution"]:
-                    ax.legend(loc='lower left', frameon=True)
+                    ax.legend(loc='lower left', frameon=True,
+                              handlelength=1.6, markerscale=0.8,
+                              handletextpad=0.6, labelspacing=0.3, borderaxespad=0.3)
                 else:
-                    ax.legend(loc='best', frameon=True)
+                    ax.legend(loc='best', frameon=True,
+                              handlelength=1.6, markerscale=0.8,
+                              handletextpad=0.6, labelspacing=0.3, borderaxespad=0.3)
+
+                # Re-fetch legend AFTER ax.legend(...) so we style the final one
+                legend = ax.get_legend()
+                if legend:
+                    legend.set_title("")
+                    for text in legend.get_texts():
+                        text.set_fontfamily('serif')
+                        text.set_fontsize(24)
 
         return fig
 
@@ -4012,6 +4042,7 @@ class FiguresTablesToPrint:
     def __init__(
             self,
             do_safety_checks=True,
+            log_threshold=50,
             print_time_vs_instances=True,
             print_cumulative_hv=True,
             print_hv_histogram=True,
@@ -4025,6 +4056,7 @@ class FiguresTablesToPrint:
             print_hv_evolution=False
     ):
         self.do_safety_checks = do_safety_checks
+        self.log_threshold = log_threshold
         self.print_time_vs_instances = print_time_vs_instances
         self.print_cumulative_hv = print_cumulative_hv
         self.print_hv_histogram = print_hv_histogram
@@ -4041,6 +4073,7 @@ class FiguresTablesToPrint:
     def __repr__(self):
         return (f"FiguresTablesToPrint("
                 f"do_safety_checks={self.do_safety_checks}, "
+                f"log_threshold={self.log_threshold}, "
                 f"time_vs_instances={self.print_time_vs_instances}, "
                 f"hv_evolution={self.print_hv_evolution}, "
                 f"cumulative_hv={self.print_cumulative_hv}, "
@@ -4061,6 +4094,7 @@ class FiguresTablesToPrint:
 
         print("\n🛠️ Configuration for printing figures and tables:")
         print(f"{symbol(self.do_safety_checks, is_safety=True)} Do safety checks: {self.do_safety_checks}")
+        print(f"{symbol(self.log_threshold)} Threshold to use log scale: {self.log_threshold}")
         print(f"{symbol(self.print_time_vs_instances)} Print time vs instances: {self.print_time_vs_instances}")
         print(f"{symbol(self.print_hv_evolution)} Print HV evolution: {self.print_hv_evolution}")
         print(f"{symbol(self.print_cumulative_hv)} Print cumulative HV: {self.print_cumulative_hv}")
@@ -4160,6 +4194,7 @@ def for_test():
     ]
     print_config = FiguresTablesToPrint(
         do_safety_checks=False,
+        log_threshold=50,
         print_time_vs_instances=False,
         print_cumulative_hv=False,
         print_hv_histogram=False,
