@@ -1397,7 +1397,7 @@ class MoAnalysis:
         return figs
 
     def plot_fronts(self, df, instances_list, figs,
-                    plot_reference_front=False):
+                    plot_reference_front=True):
         """
         For each instance, plot all strategies' fronts in the same figure.
         Assumes df is already in the final strategy naming you want to show.
@@ -1439,8 +1439,6 @@ class MoAnalysis:
             strategies_order = list(df[self.front_strategy].unique())
             colors = getattr(self, "strategy_colors", {})
             markers = getattr(self, "strategy_markers", {})
-
-        generic_key = "pareto_front"
 
         for instance_to_process in instances_list:
             df_inst = df[df[self.instance] == instance_to_process]
@@ -1486,6 +1484,7 @@ class MoAnalysis:
                     maximize = False
 
             # plot each strategy
+            at_least_one_strategy_exhaustive = False
             for strategy in strategies_order:
                 df_s = df_inst[df_inst[self.front_strategy] == strategy]
                 if df_s.empty:
@@ -1500,6 +1499,7 @@ class MoAnalysis:
                         pts_all.extend(pts)
                     if bool(r.get(self.exhaustive, False)):
                         exhaustive_flag = True
+                        at_least_one_strategy_exhaustive = True
 
                 if not pts_all:
                     continue
@@ -1532,42 +1532,33 @@ class MoAnalysis:
                                linewidths=1.0)
 
             # reference / joint front
-            if plot_reference_front:
-                ref_pts = None
-
-                # exhaustive front if exists
-                df_exh = df_inst[df_inst.get(self.exhaustive, False) == True]
-                for _, r in df_exh.iterrows():
+            # joint front (computed from all points), plotted last so it ends in the legend
+            if plot_reference_front and not at_least_one_strategy_exhaustive:
+                all_points = set()
+                for _, r in df_inst.iterrows():
                     pts = _parse_front(r.get(self.pareto_front, None))
-                    if pts:
-                        ref_pts = pts
-                        break
+                    if not pts:
+                        continue
+                    for p in pts:
+                        all_points.add(tuple(p))
 
-                # else joint
-                if ref_pts is None:
-                    all_points = set()
-                    for _, r in df_inst.iterrows():
-                        pts = _parse_front(r.get(self.pareto_front, None))
-                        if not pts:
-                            continue
-                        for p in pts:
-                            all_points.add(tuple(p))
-                    all_points = list(all_points)
-                    if all_points:
-                        ref_pts = MoAnalysis.remove_dominated_points(all_points, maximize)
+                all_points = list(all_points)
+                ref_pts = None
+                if all_points:
+                    ref_pts = MoAnalysis.remove_dominated_points(all_points, maximize)
 
                 if ref_pts:
                     ref_pts = list({tuple(p) for p in ref_pts})
                     ref_arr = np.array(ref_pts)
-                    ref_label = f"Reference - {len(ref_pts)} points"
+                    ref_label = f"Joint front - {len(ref_pts)} points"
 
                     if dim == 3:
                         ax.scatter(ref_arr[:, 0], ref_arr[:, 1], ref_arr[:, 2],
                                    label=ref_label,
                                    marker="o",
-                                   s=90,
-                                   facecolors="none",
-                                   edgecolors="black",
+                                   s=90,  # bigger than others
+                                   facecolors="none",  # unfilled
+                                   edgecolors="black",  # black contour
                                    linewidths=1.4)
                     else:
                         ax.scatter(ref_arr[:, 0], ref_arr[:, 1],
@@ -1605,7 +1596,7 @@ class MoAnalysis:
             else:
                 fig.subplots_adjust(right=0.75)
             plt.show()
-            figs[f"{generic_key}_{name_plot}"] = fig
+            figs[f"{name_plot}"] = fig
 
         return figs
 
@@ -4201,7 +4192,7 @@ class SaveAllResultsCP2025:
         # (Returning them is often more useful than printing only.)
         return (s1 == s2), front1_not_in_f2, front2_not_in_f1
 
-    def plot_pareto_fronts(self, problem_name, plot_reference_front=False, instances_list=None):
+    def plot_pareto_fronts(self, problem_name, plot_reference_front=True, instances_list=None):
         for csv_path, problem in self.csv_paths_problem:
             if problem == problem_name:
                 problem_path = csv_path
@@ -4241,11 +4232,10 @@ class SaveAllResultsCP2025:
             df_front,
             instances_list,
             figs,
-            #strategies_styled=self.strategies,
             plot_reference_front=plot_reference_front
         )
         # for saving:
-        # fig.savefig(path, bbox_inches="tight")
+        # fig.savefig(fig_path, format='pdf', bbox_inches='tight')
 
 
 class FiguresTablesToPrint:
@@ -4431,11 +4421,20 @@ def for_test():
         StrategySpec(label="SAUGMECON-Reals", source="SaugmeconNoRTestReal"),
     ]
 
-    # strategies = ["Saugmecon", "SaugmeconNoR"]  # example
-    strategies_styled = Strategies(strategy_specs)
+    mapping_strategy_names = {
+        "ParetoGavanelliGlobalConstraint": "MOBAB-CP",
+        "GIA": "GIA",
+        "ParetoDisjunctiveProgrammingNoLabel": "DisjProg",
+        "SaugmeconNoR": "SAUGMECON-I",
+    }
 
+    # strategies_styled = Strategies(strategy_specs)
+    strategies_styled = Strategies(mapping_strategy_names)
+
+    # runner = SaveAllResultsCP2025(csv_file_path_problem, print_config, strategies_styled)
     runner = SaveAllResultsCP2025(csv_file_path_problem, print_config, strategies_styled)
-    figs_paper, data_paper = runner.save_all_results()
+    # figs_paper, data_paper = runner.save_all_results()
+    figs_fronts = runner.plot_pareto_fronts("SIMS")
 
 
 
