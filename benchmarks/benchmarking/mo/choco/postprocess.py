@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 from pymoo.indicators.hv import Hypervolume
 import re
+import ast
 
 fields_to_check = {
     'sum_solutions_building_time(s)': 'Building time',
@@ -171,6 +172,17 @@ def process_json_file(input_json_file_path, output_stats_filename):
                 solutions = pareto_front
             front_metrics.update({"front_cardinality": len(pareto_front)})
 
+            try:
+                ideal_pt, nadir_pt, _ = compute_ideal_nadir_from_front(
+                    np.array(pareto_front), reference_point
+                )
+                front_metrics.update({"ideal_point": ideal_pt})
+                front_metrics.update({"nadir_point": nadir_pt})
+            except Exception:
+                # this cannot happen as there is at least one point in the front exit with error
+                print(f"Error computing ideal and nadir points for "
+                      f"instance "f"{filtered_data.get('instance', 'unknown')}", file=sys.stderr)
+                exit(1)
 
             if calculate_evolution and (calculate_evolution_for_gavanelli or filtered_data['front_generator'] !=
                                         'ParetoGavanelliGlobalConstraint'):
@@ -283,6 +295,45 @@ def calculate_hypervolume(front, reference_point):
         reference_point = -reference_point
         front = -front
     return Hypervolume(ref_point=reference_point)(front)
+
+
+def _safe_literal_list(v):
+    """Parse list-like values stored as python-literal or json-ish strings."""
+    if v is None:
+        return None
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        # sometimes stored as "{...}" in csv
+        if s.startswith("{") and s.endswith("}"):
+            s = s.replace("{", "[").replace("}", "]")
+        try:
+            return ast.literal_eval(s)
+        except (SyntaxError, ValueError):
+            try:
+                return json.loads(s)
+            except Exception:
+                return None
+    return None
+
+
+def compute_ideal_nadir_from_front(front, reference_point):
+    """
+    front: np.array shape (m, k)
+    Returns (ideal_list, nadir_list, maximize_bool) in ORIGINAL objective space.
+    """
+    maximize = is_maximization_problem(front, np.array(reference_point))
+    if maximize:
+        ideal = np.max(front, axis=0)
+        nadir = np.min(front, axis=0)
+    else:
+        ideal = np.min(front, axis=0)
+        nadir = np.max(front, axis=0)
+    return ideal.tolist(), nadir.tolist(), maximize
+
 
 
 def get_solutions_in_time_for_choco(solver_messages, all_solutions, gavanelli_front_strategy):
@@ -428,6 +479,47 @@ def remove_row_from_csv(csv_path, key_data):
             writer.writerow(row)
 
 
+def backfill_ideal_nadir_in_csv(csv_path):
+    with open(csv_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        headers = reader.fieldnames or []
+
+    # ensure columns exist
+    for col in ["ideal_point", "nadir_point"]:
+        if col not in headers:
+            headers.append(col)
+
+    for row in rows:
+        if row.get("ideal_point") and row.get("nadir_point"):
+            continue  # already filled
+
+        front = _safe_literal_list(row.get("pareto_front"))
+        refp = _safe_literal_list(row.get("reference_point"))
+
+        if not front or not refp:
+            row["ideal_point"] = row.get("ideal_point", "")
+            row["nadir_point"] = row.get("nadir_point", "")
+            continue
+
+        front = np.array(front)
+        try:
+            ideal_pt, nadir_pt, _ = compute_ideal_nadir_from_front(front, refp)
+            # store as JSON-ish strings (robust in csv)
+            row["ideal_point"] = json.dumps(ideal_pt)
+            row["nadir_point"] = json.dumps(nadir_pt)
+        except Exception:
+            row["ideal_point"] = ""
+            row["nadir_point"] = ""
+
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
+
+
+
 if __name__ == "__main__":
     # set to True to force replace existing entries in the CSV, regardless of datetime. Use with caution.
     # It should be set back to False after use.
@@ -469,6 +561,10 @@ if __name__ == "__main__":
     if not metadata:
         print(f"❌ Could not extract statistics from {input_file_path}")
         sys.exit(1)
+
+    # todo delete this is temporary to write the ideal and nadir points per row in existing csv
+    backfill_ideal_nadir_in_csv(sol_stats_filename)
+    exit(0)
 
     proceed_to_write, overwrite = proceed_to_write_experiment_in_csv(sol_stats_filename, metadata, allow_replace, force=force_replace)
     if not proceed_to_write:

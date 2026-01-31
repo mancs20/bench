@@ -2654,13 +2654,15 @@ class MoAnalysis:
             return [], []
 
         ref_point = row["reference_point"]
-        ref_point = ast.literal_eval(ref_point)
+        if isinstance(ref_point, str):
+            ref_point = ast.literal_eval(ref_point)
         num_possible_points_to_filter = len(ref_point)
         times = []
         hypervolumes = []
         # convert from string to np array
         pareto_front = row[self.pareto_front]  # is a string
-        pareto_front = ast.literal_eval(pareto_front)
+        if isinstance(pareto_front, str):
+            pareto_front = ast.literal_eval(pareto_front)
 
         maximize = is_maximization_problem(pareto_front, ref_point)
 
@@ -2973,6 +2975,9 @@ class MoAnalysis:
             if strat_df.empty:
                 continue
 
+            # todo delete this line later is just to get HV values
+            # print(f"HV values for strategy {strategy}: {strat_df[self.hypervolume]}")
+
             # Normalize hypervolume
             strat_df["normalized_hv"] = strat_df[self.hypervolume] / strat_df[self.instance].map(instance_max_hv)
             strat_df = strat_df.dropna(subset=["normalized_hv", self.time])
@@ -3079,10 +3084,12 @@ class MoAnalysis:
         # Check whether the problem is maximization or minimization
         row = df_problem.iloc[0]
         ref_point = row["reference_point"]
-        ref_point = ast.literal_eval(ref_point)
+        if isinstance(ref_point, str):
+            ref_point = ast.literal_eval(ref_point)
         # convert from string to np array
         pareto_front = row[self.pareto_front]  # is a string
-        pareto_front = ast.literal_eval(pareto_front)
+        if isinstance(pareto_front, str):
+            pareto_front = ast.literal_eval(pareto_front)
         maximize = is_maximization_problem(pareto_front, ref_point)
 
         for strategy in strategies:
@@ -3228,10 +3235,12 @@ class MoAnalysis:
         # Check whether the problem is maximization or minimization
         row = df_problem.iloc[0]
         ref_point = row["reference_point"]
-        ref_point = ast.literal_eval(ref_point)
+        if isinstance(ref_point, str):
+            ref_point = ast.literal_eval(ref_point)
         # convert from string to np array
         pareto_front = row[self.pareto_front]  # is a string
-        pareto_front = ast.literal_eval(pareto_front)
+        if isinstance(pareto_front, str):
+            pareto_front = ast.literal_eval(pareto_front)
         maximize = is_maximization_problem(pareto_front, ref_point)
 
         for strategy in strategies:
@@ -3374,10 +3383,12 @@ class MoAnalysis:
         # Check whether the problem is maximization or minimization
         row = df_problem.iloc[0]
         ref_point = row["reference_point"]
-        ref_point = ast.literal_eval(ref_point)
+        if isinstance(ref_point, str):
+            ref_point = ast.literal_eval(ref_point)
         # convert from string to np array
         pareto_front = row[self.pareto_front]  # is a string
-        pareto_front = ast.literal_eval(pareto_front)
+        if isinstance(pareto_front, str):
+            pareto_front = ast.literal_eval(pareto_front)
         maximize = is_maximization_problem(pareto_front, ref_point)
 
         for strategy in strategies:
@@ -3418,6 +3429,9 @@ class MoAnalysis:
                 # get the igd
                 strat_instance_igd = compute_igd(fronts_by_strategy.get(strategy, []), ref_point,
                                                  joint_front, maximize, plus=True)
+
+                # delete this line later is just to get IGD+ values
+                # print(f"IGD+ values for strategy {strategy} on instance {instance}: {strat_instance_igd}")
 
                 data["global"][strategy]["igd_plus"].append((instance, strat_instance_igd))
 
@@ -3666,12 +3680,15 @@ class SaveAllResultsCP2025:
             raise ValueError("Strategies is required")
         self.analysis = MoAnalysis(strategies)
         self.strategies = strategies
+        self.normalized_fronts = {}
+        self.normalized_fronts_folder = "normalized_fronts"
 
     def save_all_results(self):
         print("Starting to save all results. Here we go!")
         print(f"With evolution: {self.config.print_hv_evolution}")
         figs, data = {}, {}
         for csv_path, problem in self.csv_paths_problem:
+            self.normalized_fronts[problem] = False
             figs[problem], data[problem] = self.save_results(csv_path, problem)
         return figs, data
 
@@ -3679,10 +3696,9 @@ class SaveAllResultsCP2025:
         df = self.analysis.csv_to_df(csv_path)
         print(f"Processing {csv_path} for problem {problem}")
 
-        # current_strategies = set(self.analysis.strategies.strategies_original_name_list)
-        # df = df.loc[df[self.analysis.front_strategy].isin(current_strategies)]
-
         current_sources = set(self.analysis.strategies.strategies_original_name_list)
+        # todo delete below after testing
+        print(f"Current sources to consider: {current_sources}")
         df = df.loc[df[self.analysis.front_strategy].isin(current_sources)]
 
         # 2) expand/filter/rename into the *actual* compared strategies
@@ -3879,10 +3895,12 @@ class SaveAllResultsCP2025:
             return False
         row = df.iloc[0]
         ref_point = row["reference_point"]
-        ref_point = ast.literal_eval(ref_point)
+        if isinstance(ref_point, str):
+            ref_point = ast.literal_eval(ref_point)
         # convert from string to np array
         pareto_front = row[self.analysis.pareto_front]  # is a string
-        pareto_front = ast.literal_eval(pareto_front)
+        if isinstance(pareto_front, str):
+            pareto_front = ast.literal_eval(pareto_front)
         maximization_problems = is_maximization_problem(pareto_front, ref_point)
 
         df_filtered = df.dropna(subset=["pareto_front"])
@@ -4006,6 +4024,8 @@ class SaveAllResultsCP2025:
                 text_to_save += "\n\n"
                 text_to_save += table_exhaustive_latex
         if table_results[1] is not None:
+            if not self.normalized_fronts[problem]:
+                self.normalize_fronts_in_df(df, problem)
             non_stats_headers = ["K", "n", "instances"]
             table_non_exhaustive_latex = self.analysis.disjunctive_paper_style_dataframe_to_latex(table_results[1],
                                                                                                   non_stats_headers,
@@ -4018,7 +4038,12 @@ class SaveAllResultsCP2025:
         # Save the text to a file
         output_dir = os.path.join(self.config.folder_path, problem)
         os.makedirs(output_dir, exist_ok=True)
-        text_file_path = os.path.join(output_dir, f"table_results_{problem}.tex")
+        if self.normalized_fronts[problem]:
+            normalized_fronts_dir = os.path.join(output_dir, self.normalized_fronts_folder)
+            os.makedirs(normalized_fronts_dir, exist_ok=True)
+            text_file_path = os.path.join(normalized_fronts_dir, f"table_results_{problem}.tex")
+        else:
+            text_file_path = os.path.join(output_dir, f"table_results_{problem}.tex")
         with open(text_file_path, "w") as text_file:
             text_file.write(text_to_save)
         print(f"Saved table results to '{text_file_path}'")
@@ -4040,6 +4065,13 @@ class SaveAllResultsCP2025:
 
         figs = {}
         data = {}
+        if not self.normalized_fronts[problem] and (self.config.print_hv_evolution or self.config.print_cumulative_hv or self.config.print_hv_histogram or \
+            self.config.print_sorted_normalized_hv_per_strategy or self.config.print_sorted_contribution_per_strategy or \
+            self.config.print_sorted_igd_per_strategy or self.config.print_sorted_igd_plus_per_strategy or \
+            self.config.print_sorted_normalized_time_per_strategy):
+            # normalize fronts and compute new hypervolumes and reference point
+            self.normalize_fronts_in_df(df, problem)
+
         if self.config.print_time_vs_instances:
             figs = self.analysis.plot_time_vs_completed_instances_for_problem(df, problem, objs_elements,
                                                                               pattern_template, figs)
@@ -4093,7 +4125,12 @@ class SaveAllResultsCP2025:
                     plot_type = None
                 fig = self.clean_figure_for_paper(fig, plot_type)
 
-                fig_path = os.path.join(output_dir, f"{name}.pdf")
+                if self.normalized_fronts[problem]:
+                    normalized_fronts_dir = os.path.join(output_dir, self.normalized_fronts_folder)
+                    os.makedirs(normalized_fronts_dir, exist_ok=True)
+                    fig_path = os.path.join(normalized_fronts_dir, f"{name}.pdf")
+                else:
+                    fig_path = os.path.join(output_dir, f"{name}.pdf")
                 fig.savefig(fig_path, format='pdf', bbox_inches='tight')
                 plt.close(fig)  # optional: frees memory if you're done
             print(f"Saved {len(figs)} figures to '{output_dir}'")
@@ -4138,6 +4175,146 @@ class SaveAllResultsCP2025:
                         text.set_fontsize(24)
 
         return fig
+
+    def normalize_fronts_in_df(self, df, problem=None):
+        # df already filtered to compared strategies; modify in place
+        print("Normalizing fronts in DataFrame")
+
+        reference_point = "reference_point"
+        ideal_col = "ideal_point"
+        nadir_col = "nadir_point"
+
+        # ---- detect maximize/minimize (need real arrays, not strings)
+        row0 = df.iloc[0]
+        ref_point0 = row0[reference_point]
+        front0 = row0[self.analysis.pareto_front]
+
+        if isinstance(ref_point0, str):
+            ref_point0 = ast.literal_eval(ref_point0)
+        if isinstance(front0, str):
+            front0 = ast.literal_eval(front0)
+
+        maximize = is_maximization_problem(np.array(front0), np.array(ref_point0))
+
+        reference_point_ratio = 1.1  # leave some space beyond worst point so edge points contribute to HV
+
+        # duplicate absolute values before normalization
+        df[self.analysis.pareto_front + "_absolute_obj"] = df[self.analysis.pareto_front]
+        df[reference_point + "_absolute_obj"] = df[reference_point]
+        df[self.analysis.hypervolume + "_absolute_obj"] = df[self.analysis.hypervolume]
+
+        # ---- per instance: combined ideal / combined nadir for normalization
+        grouped = df.groupby(self.analysis.instance)
+
+        ideal_points = {}
+        nadir_points = {}
+        instance_all_exhaustive = {}
+        for instance, group in grouped:
+            # if exhaustive exists, take its ideal (first one)
+            exhaustive_strategies = group[group[self.analysis.exhaustive] == True]
+
+            if not exhaustive_strategies.empty:
+                if len(exhaustive_strategies) == len(group):
+                    hv_vals = group[self.analysis.hypervolume].astype(float).unique()
+                    if len(hv_vals) == 1:
+                        instance_all_exhaustive[instance] = True
+                        continue
+                ip = exhaustive_strategies.iloc[0][ideal_col]
+                ideal_point = ast.literal_eval(ip) if isinstance(ip, str) else ip
+            else:
+                # best ideal among strategies
+                ideal_point = None
+                for _, r in group.iterrows():
+                    ic = r[ideal_col]
+                    ideal_candidate = ast.literal_eval(ic) if isinstance(ic, str) else ic
+                    if ideal_candidate is None or (isinstance(ideal_candidate, float) and np.isnan(ideal_candidate)):
+                        continue
+                    if ideal_point is None:
+                        ideal_point = list(ideal_candidate)
+                    else:
+                        if maximize:
+                            ideal_point = [max(i, j) for i, j in zip(ideal_point, ideal_candidate)]
+                        else:
+                            ideal_point = [min(i, j) for i, j in zip(ideal_point, ideal_candidate)]
+
+            # worst nadir among strategies
+            nadir_point = None
+            for _, r in group.iterrows():
+                nc = r[nadir_col]
+                nadir_candidate = ast.literal_eval(nc) if isinstance(nc, str) else nc
+                if nadir_candidate is None or (isinstance(nadir_candidate, float) and np.isnan(nadir_candidate)):
+                    continue
+                if nadir_point is None:
+                    nadir_point = list(nadir_candidate)
+                else:
+                    if maximize:
+                        nadir_point = [min(i, j) for i, j in zip(nadir_point, nadir_candidate)]
+                    else:
+                        nadir_point = [max(i, j) for i, j in zip(nadir_point, nadir_candidate)]
+
+            ideal_points[instance] = ideal_point
+            nadir_points[instance] = nadir_point
+
+        # ---- normalize fronts + set normalized reference point + recompute HV
+        # normalized reference: [1.1, 1.1, ...] (since normalized space is [0,1], worst=1)
+        # compute_hv expects minimization (good): our normalization produces 0=best, 1=worst for BOTH problem types
+        for instance, group in grouped:
+            if instance in instance_all_exhaustive:
+                # all strategies exhaustive with same HV -> skip normalization
+                continue
+            ideal_point = ideal_points.get(instance)
+            nadir_point = nadir_points.get(instance)
+            if ideal_point is None or nadir_point is None:
+                raise ValueError(f"There should be an ideal and nadir point in instance '{instance}'.")
+
+            ideal_arr = np.array(ideal_point, dtype=float)
+            nadir_arr = np.array(nadir_point, dtype=float)
+
+            denom = abs(nadir_arr - ideal_arr)
+            # avoid division by zero per objective (degenerate dimension)
+            denom_safe = np.where(np.abs(denom) < 1e-12, 1.0, denom)
+
+            norm_ref = np.ones_like(ideal_arr, dtype=float) * reference_point_ratio
+
+            # iterate rows of this instance and update df in place
+            for idx, r in group.iterrows():
+                front = r[self.analysis.pareto_front + "_absolute_obj"]
+                if pd.isna(front):
+                    raise ValueError(f"Front cannot be NaN in instance '{instance}' and strategy '{r[self.analysis.front_strategy]}'.")
+                if isinstance(front, str):
+                    try:
+                        front = ast.literal_eval(front)
+                    except Exception:
+                        raise ValueError(f"Front cannot be parsed in instance '{instance}' and strategy '{r[self.analysis.front_strategy]}': {front}")
+
+                front_arr = np.array(front, dtype=float)
+                if front_arr.size == 0:
+                    raise ValueError(f"Front cannot be empty in instance '{instance}' and strategy '{r[self.analysis.front_strategy]}'.")
+
+                # ---- min-max normalization to 0(best) .. 1(worst)
+                # normalized = (value - ideal) / (nadir - ideal)
+                norm_front = abs(front_arr - ideal_arr) / denom_safe
+
+                # clip numerical noise slightly outside [0,1]
+                norm_front = np.clip(norm_front, 0.0, 1.0)
+
+                # write normalized front + normalized reference point
+                # df.at[idx, self.analysis.pareto_front] = norm_front.tolist()
+                # df.at[idx, reference_point] = norm_ref.tolist()
+                df.at[idx, self.analysis.pareto_front] = str(norm_front.tolist())
+                df.at[idx, reference_point] = str(norm_ref.tolist())
+
+                # recompute HV on normalized front
+                try:
+                    hv = compute_hv(norm_front, norm_ref, double_check_non_dominance=False)
+                    df.at[idx, self.analysis.hypervolume] = float(hv)
+                except Exception:
+                    # keep old value if something goes wrong
+                    raise ValueError(f"Could not compute hypervolume for normalized front in instance '{instance}' and strategy '{r[self.analysis.front_strategy]}'.")
+            print(f"Computed normalization for instance '{instance}'.")
+
+        if problem is not None:
+            self.normalized_fronts[problem] = True
 
     @staticmethod
     def check_if_two_fronts_are_equal(f1, f2):
@@ -4192,7 +4369,7 @@ class SaveAllResultsCP2025:
         # (Returning them is often more useful than printing only.)
         return (s1 == s2), front1_not_in_f2, front2_not_in_f1
 
-    def plot_pareto_fronts(self, problem_name, plot_reference_front=True, instances_list=None):
+    def plot_pareto_fronts(self, problem_name, plot_reference_front=True, instances_list=None, normalize=True):
         for csv_path, problem in self.csv_paths_problem:
             if problem == problem_name:
                 problem_path = csv_path
@@ -4223,9 +4400,9 @@ class SaveAllResultsCP2025:
         # default: all instances
         if instances_list is None:
             instances_list = df_front[self.analysis.instance].unique()
-            # delete below it is only for testing
-            instances_list = [instances_list[5]]
-            # instances_list = [instances_list[28]]
+
+        if normalize:
+            self.normalize_fronts_in_df(df_front)
 
         figs = {}
         return self.analysis.plot_fronts(
@@ -4375,10 +4552,10 @@ class Metrics:
 
 def for_test():
     csv_file_path_problem = [
-        (
-            "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/ukp/saugmecon_gava_gias/mo_saugmecon_gava_gias_solutions_and_stats.csv",
-            "MUKP"
-        )  # ,
+        # (
+        #     "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/ukp/saugmecon_gava_gias/mo_saugmecon_gava_gias_solutions_and_stats.csv",
+        #     "MUKP"
+        # )  # ,
         # (
         #     "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/nqueens/saug_gava_gias_disj/mo_saug_gava_gias_disj_solutions_and_stats.csv",
         #     "MN-Queens"
@@ -4387,10 +4564,10 @@ def for_test():
         #     "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/rcpsp/saug_gava_disjunctive_gias_10800/mo_saug_gava_disjunctive_gias_18000_solutions_and_stats.csv",
         #     "MORCPSP"
         # ),
-        # (
-        #     "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/sims/fix_saug_10800_timeout/mo_fix_saug_10800_timeout_solutions_and_stats.csv",
-        #     "SIMS"
-        # )
+        (
+            "/Users/manuel.combarrosimon/Library/CloudStorage/OneDrive-UniversityofLuxembourg/Thesis ideas/code/bench/benchmarks/campaign/aion/mo/choco-solver.org-v4.10.14/sims/fix_saug_10800_timeout/mo_fix_saug_10800_timeout_solutions_and_stats.csv",
+            "SIMS"
+        )
     ]
     print_config = FiguresTablesToPrint(
         do_safety_checks=False,
@@ -4398,11 +4575,11 @@ def for_test():
         print_time_vs_instances=False,
         print_cumulative_hv=False,
         print_hv_histogram=False,
-        print_latex_tables=True,
-        print_sorted_normalized_hv_per_strategy=False,
+        print_latex_tables=False,
+        print_sorted_normalized_hv_per_strategy=True,
         print_sorted_contribution_per_strategy=False,
         print_sorted_igd_per_strategy=False,
-        print_sorted_igd_plus_per_strategy=False,
+        print_sorted_igd_plus_per_strategy=True,
         print_sorted_normalized_time_per_strategy=True,
         folder_path="debug-and-testing",
         print_hv_evolution=False
@@ -4433,7 +4610,7 @@ def for_test():
 
     # runner = SaveAllResultsCP2025(csv_file_path_problem, print_config, strategies_styled)
     runner = SaveAllResultsCP2025(csv_file_path_problem, print_config, strategies_styled)
-    # figs_paper, data_paper = runner.save_all_results()
+    figs_paper, data_paper = runner.save_all_results()
     figs_fronts = runner.plot_pareto_fronts("SIMS")
 
 
