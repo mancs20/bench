@@ -448,7 +448,7 @@ def proceed_to_write_experiment_in_csv(csv_path, key_data, allow_replace=False, 
     if not os.path.isfile(csv_path):
         return False, False
 
-    key_fields = ["problem", "instance", "front_generator", "timeout"]
+    key_fields = ["problem", "instance", "solver_version", "front_generator", "timeout"]
     target_key = tuple(key_data.get(k) for k in key_fields)
     target_datetime = key_data.get("datetime")
 
@@ -464,7 +464,7 @@ def proceed_to_write_experiment_in_csv(csv_path, key_data, allow_replace=False, 
     return True, False
 
 def remove_row_from_csv(csv_path, key_data):
-    key_fields = ["problem", "instance", "front_generator", "timeout"]
+    key_fields = ["problem", "instance", "solver_version", "front_generator", "timeout"]
     target_key = tuple(key_data.get(k) for k in key_fields)
 
     with open(csv_path, 'r', newline='') as csvfile:
@@ -563,8 +563,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # todo delete this is temporary to write the ideal and nadir points per row in existing csv
-    backfill_ideal_nadir_in_csv(sol_stats_filename)
-    exit(0)
+    # backfill_ideal_nadir_in_csv(sol_stats_filename)
+    # exit(0)
 
     proceed_to_write, overwrite = proceed_to_write_experiment_in_csv(sol_stats_filename, metadata, allow_replace, force=force_replace)
     if not proceed_to_write:
