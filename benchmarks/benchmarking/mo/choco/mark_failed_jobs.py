@@ -4,6 +4,8 @@ import json
 import shutil
 from pathlib import Path
 
+benchmarks = {"Minizinc-psplib-deadline", "cp_powa", "MOOLibrary"}
+problems = {"ukp", "NQUEENS", "RCPSP", "sims_cost_clouds", "sims_cost_clouds_angle"}
 
 def infer_paths(argv):
     """
@@ -52,16 +54,13 @@ def main():
     # 1) Build set of (benchmark, problem, instance, front_generator) that have errors
     error_keys = set()
 
-    # error_patterns = [
-    #     'Exception in thread "main"',
-    #     "CANCELLED AT",
-    #     "error",  # generic, can be tuned later
-    # ]
     error_patterns = [
         'Exception in thread "main"',
         "CANCELLED AT",
         "error",  # generic, can be tuned later
     ]
+
+    good_experiment_pattern = "Ending experiment with benchmark"
 
     for json_path in json_dir.glob("*.json"):
         try:
@@ -72,7 +71,7 @@ def main():
 
         # Quick filter: skip files with no obvious error markers
         lower_text = text.lower()
-        if not any(pat.lower() in lower_text for pat in error_patterns):
+        if good_experiment_pattern.lower() in lower_text and (not any(pat.lower() in lower_text for pat in error_patterns)):
             continue
 
         # Find the statistics line to get benchmark/problem/instance/front_generator
@@ -87,7 +86,25 @@ def main():
                 break
 
         if not stats:
-            continue
+            # is possible that the file is malformed or doesn't contain statistics; we can get info from the filename
+            # SOLVER $VERSION $CORES $THREADS $TIMEOUT $MEM_GB_PER_XP
+            # choco-solver-orgv5-0-1_NQUEENS_cp_powa_n_queens_p-2_q-10_ins-2_Gavanelli_16cores_1threads_5400_32.json
+            # get the title of the file name:
+            benchmark = get_data_from_name_comparing_with_local_info(benchmarks, json_path)
+            problem = get_data_from_name_comparing_with_local_info(problems, json_path)
+            stats_list = json_path.name.split('_')
+            front_generator = stats_list[len(stats_list) - 5]
+            # the string between benchmark and front_generator is the instance, removing the "_" at the start and the end
+            instance = extract_instance_from_name(json_path.name, benchmark, front_generator)
+            if not all([benchmark, problem, instance, front_generator]):
+                print(f"Warning: could not infer all stats from filename: {json_path.name}", file=sys.stderr)
+                continue
+            stats = {
+                "benchmark": benchmark,
+                "problem": problem,
+                "instance": instance,
+                "front_generator": front_generator,
+            }
 
         key = (
             stats.get("benchmark"),
@@ -164,6 +181,34 @@ def main():
     print(f"  rm {joblog_path.name}")
     print(f"  mv {backup_path.name} {joblog_path.name}")
 
+def get_data_from_name_comparing_with_local_info(local_dict, json_path):
+    data = None
+    for pat in local_dict:
+        if pat in json_path.name:
+            data = pat
+            break
+    if not data:
+        print(f"Warning: could not infer info from filename: {json_path.name}, the registered stats patterns "
+              f"in this script are:", file=sys.stderr)
+        for pat in local_dict:
+            print(f"  - {pat}", file=sys.stderr)
+    return data
+
+def extract_instance_from_name(filename: str, benchmark: str, front_generator: str):
+    # filename should be json_path.name or json_path.stem; both work if you match accordingly
+    start = f"{benchmark}_"
+    end = f"_{front_generator}_"
+
+    i = filename.find(start)
+    if i < 0:
+        return None
+    i += len(start)
+
+    j = filename.find(end, i)
+    if j < 0:
+        return None
+
+    return filename[i:j]
 
 if __name__ == "__main__":
     main()
