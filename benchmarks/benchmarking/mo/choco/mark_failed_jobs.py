@@ -180,6 +180,8 @@ def main():
     print("jobs.log updated. To restore backup if needed:")
     print(f"  rm {joblog_path.name}")
     print(f"  mv {backup_path.name} {joblog_path.name}")
+    print("Done. Type 'exit'")
+    print(f" Go to run.sh folder and run: 'sbatch run.sh aion.sh retry'")
 
 def get_data_from_name_comparing_with_local_info(local_dict, json_path):
     data = None
