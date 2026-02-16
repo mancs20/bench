@@ -61,6 +61,7 @@ def process_json_file(input_json_file_path, output_stats_filename):
     errors = []
     statistics = {}
     lexicographic_opt = None
+    search_strategy = None
 
     # We keep successive experiments in the JSON file, even when they fail.
     # For the statistics, we are only interested by the latest experiment,
@@ -83,10 +84,14 @@ def process_json_file(input_json_file_path, output_stats_filename):
                 errors += line
         elif LEXICOGRAPHIC_LINE in line:
             lexicographic_opt = True
+        elif "solverSearchStrategy" in line:
+            # I want to get what is after solverSearchStrategy, it is like this solverSearchStrategy: domOverWDegSearch
+            search_strategy = line.split("solverSearchStrategy:")[-1].strip().split(",")[0]
         elif "exception" in line.lower():
             exceptions.append(line)
         elif "error" in line.lower():
             errors.append(line)
+
 
     if errors != [] or exceptions != []:
         print(f"Error in {sys.argv[2]}", file=sys.stderr)
@@ -107,6 +112,8 @@ def process_json_file(input_json_file_path, output_stats_filename):
         if "front_generator" in statistics and "saugmecon" in str(statistics["front_generator"]).lower():
             # If we never saw the line, it means "checked and not present"
             filtered_data["lexicographic_opt"] = (lexicographic_opt is True)
+        if search_strategy is not None:
+            filtered_data["search_strategy"] = search_strategy
 
     if not current_json_mo_solution_details:
         instance_path = Path(sys.argv[2])
@@ -448,7 +455,7 @@ def proceed_to_write_experiment_in_csv(csv_path, key_data, allow_replace=False, 
     if not os.path.isfile(csv_path):
         return False, False
 
-    key_fields = ["problem", "instance", "solver_version", "front_generator", "timeout"]
+    key_fields = ["problem", "instance", "solver_version", "front_generator", "timeout", "search_strategy"]
     target_key = tuple(key_data.get(k) for k in key_fields)
     target_datetime = key_data.get("datetime")
 
@@ -548,19 +555,34 @@ if __name__ == "__main__":
 
     # Extract statistics line to identify the experiment
     metadata = {}
+    read_one_line = False
+    search_strategy = None
     with open(input_file_path, 'r') as file:
         for line in file:
             if '"type": "statistics"' in line:
                 try:
                     json_line = json.loads(line)
                     metadata = json_line["statistics"]
-                    break
+                    if read_one_line:
+                        break
+                    else:
+                        read_one_line = True
                 except json.JSONDecodeError:
                     continue
+            elif "solverSearchStrategy" in line:
+                # I want to get what is after solverSearchStrategy, it is like this solverSearchStrategy: domOverWDegSearch
+                tmp_search_strategy = line.split("solverSearchStrategy:")[-1].strip().split(",")[0]
+                if tmp_search_strategy != "default":
+                    search_strategy = tmp_search_strategy
+                if read_one_line:
+                    break
+                else:
+                    read_one_line = True
 
     if not metadata:
         print(f"❌ Could not extract statistics from {input_file_path}")
         sys.exit(1)
+    metadata["search_strategy"] = search_strategy
 
     # todo delete this is temporary to write the ideal and nadir points per row in existing csv
     # backfill_ideal_nadir_in_csv(sol_stats_filename)

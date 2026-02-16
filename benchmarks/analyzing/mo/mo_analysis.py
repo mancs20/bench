@@ -199,7 +199,7 @@ def set_general_plot_style():
         "axes.titlesize": 20,
         "xtick.labelsize": 16,
         "ytick.labelsize": 16,
-        "legend.fontsize": 24,
+        "legend.fontsize": 18,
         "lines.markersize": 8,
         # grid style + enable it globally
         "axes.grid": True,
@@ -4024,7 +4024,7 @@ class SaveAllResultsCP2025:
                 text_to_save += "\n\n"
                 text_to_save += table_exhaustive_latex
         if table_results[1] is not None:
-            if not self.normalized_fronts[problem]:
+            if self.config.perform_front_normalization and not self.normalized_fronts[problem]:
                 self.normalize_fronts_in_df(df, problem)
             non_stats_headers = ["K", "n", "instances"]
             table_non_exhaustive_latex = self.analysis.disjunctive_paper_style_dataframe_to_latex(table_results[1],
@@ -4065,10 +4065,9 @@ class SaveAllResultsCP2025:
 
         figs = {}
         data = {}
-        if not self.normalized_fronts[problem] and (self.config.print_hv_evolution or self.config.print_cumulative_hv or self.config.print_hv_histogram or \
-            self.config.print_sorted_normalized_hv_per_strategy or self.config.print_sorted_contribution_per_strategy or \
-            self.config.print_sorted_igd_per_strategy or self.config.print_sorted_igd_plus_per_strategy or \
-            self.config.print_sorted_normalized_time_per_strategy):
+        if self.config.perform_front_normalization and (not self.normalized_fronts[problem] and (self.config.print_hv_evolution or self.config.print_cumulative_hv or self.config.print_hv_histogram or
+                                                                                                 self.config.print_sorted_normalized_hv_per_strategy or
+                                                                                                 self.config.print_sorted_igd_per_strategy or self.config.print_sorted_igd_plus_per_strategy)):
             # normalize fronts and compute new hypervolumes and reference point
             self.normalize_fronts_in_df(df, problem)
 
@@ -4172,7 +4171,7 @@ class SaveAllResultsCP2025:
                     legend.set_title("")
                     for text in legend.get_texts():
                         text.set_fontfamily('serif')
-                        text.set_fontsize(24)
+                        text.set_fontsize(18)
 
         return fig
 
@@ -4429,6 +4428,7 @@ class FiguresTablesToPrint:
             print_sorted_igd_per_strategy=True,
             print_sorted_igd_plus_per_strategy=True,
             print_sorted_normalized_time_per_strategy=True,
+            perform_front_normalization=True,
             folder_path="cp2025",
             print_hv_evolution=False
     ):
@@ -4443,6 +4443,7 @@ class FiguresTablesToPrint:
         self.print_sorted_igd_per_strategy = print_sorted_igd_per_strategy
         self.print_sorted_igd_plus_per_strategy = print_sorted_igd_plus_per_strategy
         self.print_sorted_normalized_time_per_strategy = print_sorted_normalized_time_per_strategy
+        self.perform_front_normalization = perform_front_normalization
         self.folder_path = folder_path
         self.print_hv_evolution = print_hv_evolution
         self.print_config_lines()
@@ -4460,7 +4461,8 @@ class FiguresTablesToPrint:
                 f"sorted_contribution_hv_per_strategy={self.print_sorted_contribution_per_strategy},"
                 f"print_sorted_igd_per_strategy={self.print_sorted_igd_per_strategy},"
                 f"print_sorted_igd_plus_per_strategy={self.print_sorted_igd_plus_per_strategy},"
-                f"print_sorted_normalized_time_per_strategy={self.print_sorted_normalized_time_per_strategy},")
+                f"print_sorted_normalized_time_per_strategy={self.print_sorted_normalized_time_per_strategy},"
+                f"perform_front_normalization={self.perform_front_normalization}, ")
 
     def print_config_lines(self):
         def symbol(value, is_safety=False):
@@ -4487,6 +4489,10 @@ class FiguresTablesToPrint:
             f"{symbol(self.print_sorted_igd_plus_per_strategy)} Print sorted IGD+ per strategy: {self.print_sorted_igd_plus_per_strategy}")
         print(
             f"{symbol(self.print_sorted_normalized_time_per_strategy)} Print sorted normalized time per strategy: {self.print_sorted_normalized_time_per_strategy}")
+        print(
+            f"{symbol(self.perform_front_normalization)} Perform front normalization: {self.perform_front_normalization}")
+        if not self.perform_front_normalization:
+                print("⚠️ Warning!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: Front normalization is disabled. This may lead to misleading comparisons in HV and IGD+ if the objectives have different scales!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         print(f"Folder path: {self.folder_path}")
         print("")  # Just a clean newline
 
@@ -4581,6 +4587,7 @@ def for_test():
         print_sorted_igd_per_strategy=False,
         print_sorted_igd_plus_per_strategy=True,
         print_sorted_normalized_time_per_strategy=True,
+        perform_front_normalization=True,
         folder_path="debug-and-testing",
         print_hv_evolution=False
     )

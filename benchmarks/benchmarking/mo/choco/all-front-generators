@@ -2,11 +2,15 @@ ParetoImproveAllObjs
 GIA
 GIA_bounded
 GIA_boundedLazy
+GIA_SumObjNoGoodAllFailsFirst
+GIA_SumObjNoGoodPareto
+GIA_SumObj
 BiObjGIA_sparsity
 BiObjGIA_sparsityBounded
 BiObjGIA_regionImplementation
 ParetoGavanelliGlobalConstraint
 ParetoGavanelliGlobalConstraintNoEvolutionInfo
+Gavanelli
 ParetoDisjunctiveProgramming
 SaugmeconFrontVerify
 SaugmeconNoR
