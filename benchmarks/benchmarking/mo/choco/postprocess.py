@@ -171,8 +171,8 @@ def process_json_file(input_json_file_path, output_stats_filename):
             if len(pareto_front) != len(current_json_mo_solution_details.get('pareto_front')):
                 # pareto_front to string to avoid numpy array serialization issues
                 current_json_mo_solution_details['pareto_front'] = pareto_front.tolist()
-            hypervolume = calculate_hypervolume(pareto_front, np.array(reference_point))
-            front_metrics.update({"hypervolume": hypervolume})
+            # hypervolume = calculate_hypervolume(pareto_front, np.array(reference_point))
+            front_metrics.update({"hypervolume": 1.0})
             if 'all_solutions' in current_json_mo_solution_details:
                 solutions = current_json_mo_solution_details.get('all_solutions')
             else:

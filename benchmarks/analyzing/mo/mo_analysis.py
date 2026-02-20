@@ -265,6 +265,27 @@ class MoAnalysis:
         self.strategy_colors = self.strategies.colors
         self.strategy_markers = self.strategies.markers
 
+    def set_stats_non_exhaustive_for_metric(self, metric: str):
+        """
+        Switch the non-exhaustive table metric away from hypervolume.
+
+        Assumption: your analysis code expects the metric column to already exist in the df
+        and to be numeric (NaN allowed).
+        """
+        # what you compare for non-exhaustive (replace "hypervolume" by metric)
+        # keep the same second column ("front_cardinality") if you want it unchanged.
+        if metric == "igd_plus":
+            metric_pretty_name = "IGD$^+$"
+        elif metric == "igd":
+            metric_pretty_name = "IGD"
+        else:
+            raise ValueError(f"Unknown metric for non-exhaustive table: {metric}")
+
+        # self.stats_non_exhaustive = ["hypervolume", "front_cardinality", "exhaustive"]
+        self.stats_non_exhaustive[0] = metric
+        # self.stats_non_exhaustive_pretty_name = ["Hyp", "Points", "Compl"]
+        self.stats_non_exhaustive_pretty_name[0] = metric_pretty_name
+
     def create_default_strategies(self):
         default_strategies = {"GIA":"GIA", "GIA_boundedLazy":"GIAubL", "GIA_bounded":"GIAub",
                               "ParetoDisjunctiveProgramming":"DisjProg", "ParetoGavanelliGlobalConstraint":"Gavanelli",
@@ -3727,27 +3748,84 @@ class SaveAllResultsCP2025:
                 if not self.safety_check_all_instances_same_number_strategies(df):
                     print(f"Safety checks for all instances having the same number of strategies has failed for {csv_path}")
                     return None, None
-            if not self.safety_check_exhaustive(df):
+            passed_exhaustive_check, sorted_front = self.safety_check_exhaustive(df)
+            if not passed_exhaustive_check:
                 print(f"Safety checks for exhaustive conditions has failed for {csv_path}")
                 return None, None
-            if not self.safety_check_fronts(df):
+            if not self.safety_check_fronts(df, sorted_front):
                 print(f"Safety checks for fronts has failed for {csv_path}")
                 return None, None
-            if not self.safety_check_no_duplicates(df):
+            if not self.safety_check_no_duplicates(df, sorted_front):
                 print(f"Safety checks for duplicates has failed for {csv_path}")
                 return None, None
             print("Safety checks passed")
         else:
             print(f"⚠️ Unless you are sure, it is recommended to enable safety checks")
 
+        figs, data = self.save_all_figs(df, problem)
+
+        metric = self.analysis.hypervolume
+        if not (self.config.print_cumulative_hv or self.config.print_hv_histogram or
+                self.config.print_sorted_normalized_hv_per_strategy):
+            # not hv computed with normalized fronts
+            df, metric = self.add_metric_from_plot_data(df, data)
+
         print("Creating pretty tables")
         if self.config.print_latex_tables:
-            self.save_latex_table_text(df, problem)
+            self.save_latex_table_text(df, problem, metric)
             print("Creating pretty tables done")
 
-        figs, data = self.save_all_figs(df, problem)
         print("Finished processing")
         return figs, data
+
+    def add_metric_from_plot_data(self, df, data, prefer=("igd_plus", "igd"), include_solver=False):
+        """
+        Adds one metric column to df from your already-computed plot 'data' dict.
+
+        Returns:
+          (df_out, chosen_metric_name or None)
+
+        prefer: ordered list of metric names to try.
+        """
+
+        # 1) choose metric that exists in data
+        chosen_metric = None
+        for m in prefer:
+            if m in data:
+                chosen_metric = m
+                break
+        if chosen_metric is None:
+            return df, None
+
+        metric_block = data.get(chosen_metric)
+        global_block = metric_block.get("global")
+
+        rows = []
+        for strat, payload in global_block.items():
+            # payload is expected to contain {chosen: [(inst,val), ...]}
+            pairs = payload.get(chosen_metric)
+            for inst, val in pairs:
+                row = {
+                    self.analysis.instance: inst,
+                    self.analysis.front_strategy: strat,
+                    chosen_metric: float(val) if val is not None else np.nan,
+                }
+                if include_solver:
+                    # only if your dict is solver-specific (usually it isn't)
+                    row[self.analysis.solver_name] = payload.get("solver", None)
+                rows.append(row)
+
+        if not rows:
+            return df, None
+
+        df_metric = pd.DataFrame(rows)
+
+        keys = [self.analysis.instance, self.analysis.front_strategy]
+        if include_solver:
+            keys = [self.analysis.instance, self.analysis.solver_name, self.analysis.front_strategy]
+
+        df_out = df.merge(df_metric, on=keys, how="left")
+        return df_out, chosen_metric
 
     def keep_only_common_instances(self, df, instance_col, strategy_col, required_strategies):
         required = set(required_strategies)
@@ -3811,23 +3889,88 @@ class SaveAllResultsCP2025:
             print("All the groups have the same number of strategies")
         return True
 
+    # def safety_check_exhaustive_to_delete(self, df):
+    #     # Filter only rows where exhaustive == True
+    #     df_exhaustive = df[df[self.analysis.exhaustive] == True]
+    #
+    #     # Group exhaustive=True rows by instance and count unique hypervolumes
+    #     hypervolume_diff = df_exhaustive.groupby(self.analysis.instance)[self.analysis.hypervolume].nunique()
+    #     hypervolume_diff = hypervolume_diff[hypervolume_diff > 1]
+    #
+    #     if hypervolume_diff.size > 0:
+    #         print("There are groups where exhaustive=True rows have different hypervolumes:")
+    #         print(hypervolume_diff)
+    #
+    #         df_exhaustive = df_exhaustive.copy()
+    #         df_exhaustive['pareto_front_size'] = df_exhaustive[self.analysis.pareto_front].apply(
+    #             lambda v: 0 if pd.isna(v)
+    #             else len(v) if isinstance(v, (list, tuple))
+    #             else (len(ast.literal_eval(v)) if isinstance(v, str) else 0)
+    #         )
+    #
+    #         cols_to_show = [
+    #             self.analysis.problem,
+    #             self.analysis.instance,
+    #             self.analysis.front_strategy,
+    #             'pareto_front_size',
+    #             self.analysis.hypervolume,
+    #             self.analysis.exhaustive,
+    #             self.analysis.time,
+    #             'sum_solutions_resolution_time(s)',
+    #             'datetime',
+    #             self.analysis.pareto_front,
+    #         ]
+    #         problem_instances = hypervolume_diff.index
+    #         self.save_temp_csv_for_debugging(df_exhaustive, problem_instances, cols_to_show, "different hypervolumes when exhaustive=true")
+    #         return False
+    #     else:
+    #         print("The strategies that are exhaustive produce the same hypervolume")
+    #
+    #     # 🔹 Count groups where NOT all rows have exhaustive = True
+    #     count_not_all_exhaustive = df.groupby(self.analysis.instance)[self.analysis.exhaustive].apply(
+    #         lambda x: not x.all()).sum()
+    #
+    #     total_groups = df[self.analysis.instance].nunique()
+    #
+    #     print(
+    #         f"Number of groups where not all strategies are exhaustive = True: {count_not_all_exhaustive} / {total_groups}")
+    #
+    #     return True
+
     def safety_check_exhaustive(self, df):
-       # Ensure hypervolume column has no NaN values
-        df.fillna({"hypervolume": 0}, inplace=True)
+        df_exhaustive = df[df[self.analysis.exhaustive] == True].copy()
 
-        # Filter only rows where exhaustive == True
-        df_exhaustive = df[df[self.analysis.exhaustive] == True]
+        size_diff = df_exhaustive.groupby(self.analysis.instance)["front_cardinality"].nunique()
+        size_diff = size_diff[size_diff > 1]
 
-        # Group exhaustive=True rows by instance and count unique hypervolumes
-        hypervolume_diff = df_exhaustive.groupby(self.analysis.instance)[self.analysis.hypervolume].nunique()
-        hypervolume_diff = hypervolume_diff[hypervolume_diff > 1]
+        if size_diff.size > 0:
+            print("There are groups where exhaustive=True rows have different front_cardinality:")
+            print(df_exhaustive[df_exhaustive[self.analysis.instance].isin(size_diff.index)]
+                  .groupby(self.analysis.instance)["front_cardinality"]
+                  .apply(lambda x: sorted(x.unique())))
+            return False, None
 
-        if hypervolume_diff.size > 0:
-            print("There are groups where exhaustive=True rows have different hypervolumes:")
-            print(hypervolume_diff)
+        def _sorted_front(v):
+            if pd.isna(v):
+                return tuple()
+            if isinstance(v, str):
+                front = eval(v)
+            else:
+                front = v
+            if front is None:
+                return tuple()
+            return tuple(sorted(map(tuple, front)))
 
-            df_exhaustive = df_exhaustive.copy()
-            df_exhaustive['pareto_front_size'] = df_exhaustive[self.analysis.pareto_front].apply(
+        df_exhaustive["sorted_front"] = df_exhaustive[self.analysis.pareto_front].apply(_sorted_front)
+
+        front_diff = df_exhaustive.groupby(self.analysis.instance)["sorted_front"].nunique()
+        front_diff = front_diff[front_diff > 1]
+
+        if front_diff.size > 0:
+            print("There are groups where exhaustive=True rows have different Pareto fronts (after sorting):")
+            print(front_diff)
+
+            df_exhaustive["pareto_front_size"] = df_exhaustive[self.analysis.pareto_front].apply(
                 lambda v: 0 if pd.isna(v)
                 else len(v) if isinstance(v, (list, tuple))
                 else (len(ast.literal_eval(v)) if isinstance(v, str) else 0)
@@ -3837,19 +3980,24 @@ class SaveAllResultsCP2025:
                 self.analysis.problem,
                 self.analysis.instance,
                 self.analysis.front_strategy,
-                'pareto_front_size',
-                self.analysis.hypervolume,
+                "pareto_front_size",
+                "front_cardinality",
+                "sorted_front",
                 self.analysis.exhaustive,
                 self.analysis.time,
-                'sum_solutions_resolution_time(s)',
-                'datetime',
+                "sum_solutions_resolution_time(s)",
+                "datetime",
                 self.analysis.pareto_front,
             ]
-            problem_instances = hypervolume_diff.index
-            self.save_temp_csv_for_debugging(df_exhaustive, problem_instances, cols_to_show, "different hypervolumes when exhaustive=true")
-            return False
+
+            problem_instances = front_diff.index
+            self.save_temp_csv_for_debugging(
+                df_exhaustive, problem_instances, cols_to_show,
+                "different fronts when exhaustive=true"
+            )
+            return False, df_exhaustive[["sorted_front"]]
         else:
-            print("The strategies that are exhaustive produce the same hypervolume")
+            print("The strategies that are exhaustive produce the same Pareto front (after sorting)")
 
         # 🔹 Count groups where NOT all rows have exhaustive = True
         count_not_all_exhaustive = df.groupby(self.analysis.instance)[self.analysis.exhaustive].apply(
@@ -3860,7 +4008,7 @@ class SaveAllResultsCP2025:
         print(
             f"Number of groups where not all strategies are exhaustive = True: {count_not_all_exhaustive} / {total_groups}")
 
-        return True
+        return True, df_exhaustive[["sorted_front"]]
 
     def save_temp_csv_for_debugging(self, df_to_save, problem_instances, cols_to_show, issue_type):
         details = (
@@ -3889,7 +4037,7 @@ class SaveAllResultsCP2025:
         details.to_csv(out_path, index=False)
         print(f"Saved exhaustive issues details to: {out_path}")
 
-    def safety_check_fronts(self, df):
+    def safety_check_fronts(self, df, sorted_front=None):
         if df.empty:
             print("DataFrame is empty, skipping problem.")
             return False
@@ -3930,7 +4078,7 @@ class SaveAllResultsCP2025:
             return False
         return True
 
-    def safety_check_no_duplicates(self, df):
+    def safety_check_no_duplicates(self, df, sorted_front=None):
         key_cols = [self.analysis.instance, self.analysis.front_strategy, self.analysis.timeout]
         dupes = df[df.duplicated(subset=key_cols, keep=False)].sort_values(
             [self.analysis.instance, self.analysis.front_strategy, self.analysis.timeout, 'datetime'])
@@ -3946,7 +4094,6 @@ class SaveAllResultsCP2025:
                 self.analysis.instance,
                 self.analysis.front_strategy,
                 self.analysis.timeout,
-                self.analysis.hypervolume,
                 self.analysis.exhaustive,
                 self.analysis.time,
                 'sum_solutions_resolution_time(s)',
@@ -3982,7 +4129,7 @@ class SaveAllResultsCP2025:
         df.to_csv(csv_path, index=False)
 
 
-    def save_latex_table_text(self, df, problem):
+    def save_latex_table_text(self, df, problem, metric=None):
         # Get evaluation of the experiments like in the Disjunctive Programming paper for exhasutive and non exhaustive instances
         # todo select the part of the df in which you're interested
         df_for_tables = df
@@ -3995,6 +4142,11 @@ class SaveAllResultsCP2025:
         non_stats_headers = None  # they are inside the code
         # title_exhaustive = "Comparison strategies when all exhaustive"
         # title_non_exhaustive = "Comparison strategies when not all exhaustive"
+
+        # If metric is provided, switch non-exhaustive tables to use it (instead of hypervolume)
+        if metric is not None and metric is not self.analysis.hypervolume:
+            self.analysis.set_stats_non_exhaustive_for_metric(metric)
+
         for stats, stats_pretty_name in zip(stats_exhaustive, stats_exhaustive_pretty_name):
             self.analysis.set_stats_exhaustive(stats, stats_pretty_name)
             if problem == "MUKP":
@@ -4200,7 +4352,7 @@ class SaveAllResultsCP2025:
         # duplicate absolute values before normalization
         df[self.analysis.pareto_front + "_absolute_obj"] = df[self.analysis.pareto_front]
         df[reference_point + "_absolute_obj"] = df[reference_point]
-        df[self.analysis.hypervolume + "_absolute_obj"] = df[self.analysis.hypervolume]
+        # df[self.analysis.hypervolume + "_absolute_obj"] = df[self.analysis.hypervolume]
 
         # ---- per instance: combined ideal / combined nadir for normalization
         grouped = df.groupby(self.analysis.instance)
@@ -4213,11 +4365,12 @@ class SaveAllResultsCP2025:
             exhaustive_strategies = group[group[self.analysis.exhaustive] == True]
 
             if not exhaustive_strategies.empty:
-                if len(exhaustive_strategies) == len(group):
-                    hv_vals = group[self.analysis.hypervolume].astype(float).unique()
-                    if len(hv_vals) == 1:
-                        instance_all_exhaustive[instance] = True
-                        continue
+                hv_vals = group[self.analysis.hypervolume]
+                if len(exhaustive_strategies) == len(group) and hv_vals.nunique(dropna=False) == 1:
+                    if hv_vals.iloc[0] == 0:
+                        df.loc[group.index, self.analysis.hypervolume] = 1.0
+                    instance_all_exhaustive[instance] = True
+                    continue
                 ip = exhaustive_strategies.iloc[0][ideal_col]
                 ideal_point = ast.literal_eval(ip) if isinstance(ip, str) else ip
             else:
@@ -4303,13 +4456,14 @@ class SaveAllResultsCP2025:
                 df.at[idx, self.analysis.pareto_front] = str(norm_front.tolist())
                 df.at[idx, reference_point] = str(norm_ref.tolist())
 
-                # recompute HV on normalized front
-                try:
-                    hv = compute_hv(norm_front, norm_ref, double_check_non_dominance=False)
-                    df.at[idx, self.analysis.hypervolume] = float(hv)
-                except Exception:
-                    # keep old value if something goes wrong
-                    raise ValueError(f"Could not compute hypervolume for normalized front in instance '{instance}' and strategy '{r[self.analysis.front_strategy]}'.")
+                # recompute HV on normalized front if it is required for later analysis
+                if self.config.print_cumulative_hv or self.config.print_hv_histogram or self.config.print_sorted_normalized_hv_per_strategy:
+                    try:
+                        hv = compute_hv(norm_front, norm_ref, double_check_non_dominance=False)
+                        df.at[idx, self.analysis.hypervolume] = float(hv)
+                    except Exception:
+                        # keep old value if something goes wrong
+                        raise ValueError(f"Could not compute hypervolume for normalized front in instance '{instance}' and strategy '{r[self.analysis.front_strategy]}'.")
             print(f"Computed normalization for instance '{instance}'.")
 
         if problem is not None:
@@ -4581,12 +4735,12 @@ def for_test():
         print_time_vs_instances=False,
         print_cumulative_hv=False,
         print_hv_histogram=False,
-        print_latex_tables=False,
+        print_latex_tables=True,
         print_sorted_normalized_hv_per_strategy=True,
         print_sorted_contribution_per_strategy=False,
         print_sorted_igd_per_strategy=False,
         print_sorted_igd_plus_per_strategy=True,
-        print_sorted_normalized_time_per_strategy=True,
+        print_sorted_normalized_time_per_strategy=False,
         perform_front_normalization=True,
         folder_path="debug-and-testing",
         print_hv_evolution=False
@@ -4601,19 +4755,19 @@ def for_test():
     #     "GIA": "GIA",
     # }
     strategy_specs = [
-        StrategySpec(label="SAUGMECON-lex", source="SaugmeconNoR", query="lexicographic_opt == True"),
-        StrategySpec(label="SAUGMECON-Reals", source="SaugmeconNoRTestReal"),
+        StrategySpec(label="SAUGMECON", source="Saugmecon",
+                     query="solver_version == 'v5.0.0' and search_strategy == 'domOverWDegSearch'"),
+        StrategySpec(label="MOBAB-CP-wd", source="Gavanelli",
+                     query="solver_version == 'v5.0.0' and search_strategy == 'domOverWDegSearch'"),
     ]
 
     mapping_strategy_names = {
         "ParetoGavanelliGlobalConstraint": "MOBAB-CP",
         "GIA": "GIA",
-        "ParetoDisjunctiveProgrammingNoLabel": "DisjProg",
-        "SaugmeconNoR": "SAUGMECON-I",
     }
 
-    # strategies_styled = Strategies(strategy_specs)
-    strategies_styled = Strategies(mapping_strategy_names)
+    strategies_styled = Strategies(strategy_specs)
+    # strategies_styled = Strategies(mapping_strategy_names)
 
     # runner = SaveAllResultsCP2025(csv_file_path_problem, print_config, strategies_styled)
     runner = SaveAllResultsCP2025(csv_file_path_problem, print_config, strategies_styled)
