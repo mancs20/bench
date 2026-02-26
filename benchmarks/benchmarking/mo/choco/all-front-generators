@@ -23,3 +23,5 @@ ParetoDisjunctiveProgrammingNoLabel
 SaugmeconNoRTestReal
 SaugmeconGlobalIntermediateUB
 SaugmeconUB
+SaugmeconGlobalIntermediateImproved
+SaugmeconGlobalIntermediateImprovedUB
