@@ -162,3 +162,5 @@ cython_debug/
 campaign/
 pybench
 .idea
+*.pdf
+*.tex
