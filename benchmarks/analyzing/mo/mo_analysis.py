@@ -2939,9 +2939,10 @@ class MoAnalysis:
                 if strategy not in obj_data:
                     continue
                 hv_sorted = obj_data[strategy]["hv"]
-                x = list(range(1, len(hv_sorted) + 1))
+                hv_values = [val for (_, val) in hv_sorted]
+                x = list(range(1, len(hv_values) + 1))
 
-                ax.plot(x, hv_sorted,
+                ax.plot(x, hv_values,
                         label=strategy,
                         color=self.strategy_colors[strategy],
                         marker=self.strategy_markers[strategy],
@@ -2950,7 +2951,8 @@ class MoAnalysis:
                         markerfacecolor='none',  # Unfilled marker
                         linewidth=1.5)
 
-            self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by normalized HV)", ylabel="Normalized HV")
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized HV)",
+                                          ylabel="HV / best HV")
             figs[f"normalized_hv_sorted_per_instance_{problem_name}_{obj}obj"] = fig
             plt.show()
 
@@ -2962,9 +2964,10 @@ class MoAnalysis:
             if strategy not in data["global"]:
                 continue
             hv_sorted = data["global"][strategy]["hv"]
-            x = list(range(1, len(hv_sorted) + 1))
+            hv_values = [val for (_, val) in hv_sorted]
+            x = list(range(1, len(hv_values) + 1))
 
-            ax.plot(x, hv_sorted,
+            ax.plot(x, hv_values,
                     label=strategy,
                     color=self.strategy_colors[strategy],
                     marker=self.strategy_markers[strategy],
@@ -2973,14 +2976,21 @@ class MoAnalysis:
                     markerfacecolor='none',
                     linewidth=1.5)
 
-        self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by normalized HV)", ylabel="Normalized HV")
+        self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized HV)",
+                                      ylabel="HV / best HV")
         figs[f"normalized_hv_sorted_per_instance_{problem_name}_all"] = fig
         plt.show()
 
         return figs
 
-    def get_normalized_hv_per_strategy_data(self, df, problem_name, objs_elements, pattern_template):
-        df_problem = df
+    def get_normalized_hv_per_strategy_data(self, df, problem_name, objs_elements, pattern_template,
+                                            remove_completed_instances=False):
+        df_problem = df.copy()
+
+        # Optional remove instances completed by all the strategies
+        if remove_completed_instances:
+            df_problem = self.remove_instances_completed_by_all_strategies(df_problem)
+
         strategies = df_problem[self.front_strategy].unique()
 
         data = {
@@ -3005,7 +3015,7 @@ class MoAnalysis:
 
             # ---------- GLOBAL ----------
             strat_df_sorted = strat_df.sort_values(by=["normalized_hv", self.time], ascending=[False, True])
-            data["global"][strategy]["hv"] = strat_df_sorted["normalized_hv"].tolist()
+            data["global"][strategy]["hv"] = list(zip(strat_df_sorted[self.instance], strat_df_sorted["normalized_hv"]))
 
             # ---------- PER OBJECTIVE ----------
             for obj, elements_list in objs_elements.items():
@@ -3017,7 +3027,7 @@ class MoAnalysis:
                     continue
 
                 strat_df_obj_sorted = strat_df_obj.sort_values(by=["normalized_hv", self.time], ascending=[False, True])
-                normalized_hvs = strat_df_obj_sorted["normalized_hv"].tolist()
+                normalized_hvs = list(zip(strat_df_obj_sorted[self.instance], strat_df_obj_sorted["normalized_hv"]))
 
                 if obj not in data["objectives"]:
                     data["objectives"][obj] = {}
@@ -3026,6 +3036,21 @@ class MoAnalysis:
                 }
 
         return data
+
+    def remove_instances_completed_by_all_strategies(self, df):
+        strategies = df[self.front_strategy].unique()
+        num_strategies = len(strategies)
+
+        instances_to_remove = []
+
+        for instance, group in df.groupby(self.instance):
+            all_strategies_present = group[self.front_strategy].nunique() == num_strategies
+            all_exhaustive = group[self.exhaustive].all()
+
+            if all_strategies_present and all_exhaustive:
+                instances_to_remove.append(instance)
+
+        return df[~df[self.instance].isin(instances_to_remove)]
 
     # -------------------------------------------------------------------------------------------------------------------
     # ----------------- Normalized contribution per strategy -----------------------------------------------------------
@@ -3059,7 +3084,7 @@ class MoAnalysis:
                         markerfacecolor='none',  # Unfilled marker
                         linewidth=1.5)
 
-            self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by contribution)",
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by contribution)",
                                           ylabel="Contribution to joint front", ylim=[0, 1.05])
             figs[f"normalized_contribution_sorted_{problem_name}_{obj}obj"] = fig
             plt.show()
@@ -3084,15 +3109,20 @@ class MoAnalysis:
                     markerfacecolor='none',
                     linewidth=1.5)
 
-        self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by contribution)",
+        self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by contribution)",
                                       ylabel="Contribution to joint front", ylim=[0, 1.05])
         figs[f"normalized_contribution_sorted_{problem_name}_all"] = fig
         plt.show()
 
         return figs
 
-    def get_contribution_to_joint_front_data(self, df, problem_name, objs_elements, pattern_template):
+    def get_contribution_to_joint_front_data(self, df, problem_name, objs_elements, pattern_template, remove_completed_instances=False):
         df_problem = df
+
+        # Optional remove instances completed by all the strategies
+        if remove_completed_instances:
+            df_problem = self.remove_instances_completed_by_all_strategies(df_problem)
+
         strategies = df_problem[self.front_strategy].unique()
 
         data = {
@@ -3210,7 +3240,7 @@ class MoAnalysis:
                         markerfacecolor='none',
                         linewidth=1.5)
 
-            self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by IGD)",
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by IGD)",
                                           ylabel="IGD")
             figs[f"igd_sorted_per_instance_{problem_name}_{obj}obj"] = fig
             plt.show()
@@ -3235,7 +3265,7 @@ class MoAnalysis:
                     markerfacecolor='none',
                     linewidth=1.5)
 
-        self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by IGD)",
+        self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by IGD)",
                                       ylabel="IGD")
         figs[f"igd_sorted_per_instance_{problem_name}_all"] = fig
         plt.show()
@@ -3358,7 +3388,7 @@ class MoAnalysis:
                         markerfacecolor='none',
                         linewidth=1.5)
 
-            self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by IGD+)",
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by IGD+)",
                                           ylabel="IGD+")
             figs[f"igd_plus_sorted_per_instance_{problem_name}_{obj}obj"] = fig
             plt.show()
@@ -3383,15 +3413,20 @@ class MoAnalysis:
                     markerfacecolor='none',
                     linewidth=1.5)
 
-        self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by IGD+)",
+        self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by IGD+)",
                                       ylabel="IGD+")
         figs[f"igd_plus_sorted_per_instance_{problem_name}_all"] = fig
         plt.show()
 
         return figs
 
-    def compute_igd_plus_per_strategy(self, df, problem_name, objs_elements, pattern_template):
+    def compute_igd_plus_per_strategy(self, df, problem_name, objs_elements, pattern_template, remove_completed_instances=False):
         df_problem = df
+
+        # Optional remove instances completed by all the strategies
+        if remove_completed_instances:
+            df_problem = self.remove_instances_completed_by_all_strategies(df_problem)
+
         strategies = df_problem[self.front_strategy].unique()
 
         data = {
@@ -3593,8 +3628,8 @@ class MoAnalysis:
 
             # log scale only if max/min >= log_threshold, and set readable ticks
             self.apply_y_scale_and_ticks(ax, all_vals, log_threshold=log_threshold)
-            self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by normalized time)",
-                                          ylabel="Normalized time")
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized time)",
+                                          ylabel="Runtime / best runtime")
             figs[f"normalized_time_sorted_per_instance_{problem_name}_{obj}obj"] = fig
             plt.show()
 
@@ -3622,8 +3657,8 @@ class MoAnalysis:
 
         # log scale only if max/min >= log_threshold, and set readable ticks
         self.apply_y_scale_and_ticks(ax, all_vals, log_threshold=log_threshold)
-        self.finalize_plot_for_screen(fig, ax, xlabel="Instances (sorted by normalized time)",
-                                      ylabel="Normalized time")
+        self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized time)",
+                                      ylabel="Runtime / best runtime")
         figs[f"normalized_time_sorted_per_instance_{problem_name}_all"] = fig
         plt.show()
 
@@ -4235,21 +4270,21 @@ class SaveAllResultsCP2025:
         if self.config.print_hv_histogram:
             figs = self.analysis.plot_best_hypervolume_histogram(df, problem, objs_elements, pattern_template, figs)
         if self.config.print_sorted_normalized_hv_per_strategy:
-            data['hv_per_strategy'] = self.analysis.get_normalized_hv_per_strategy_data(df, problem, objs_elements, pattern_template)
+            data['hv_per_strategy'] = self.analysis.get_normalized_hv_per_strategy_data(df, problem, objs_elements, pattern_template, True)
             figs = self.analysis.plot_normalized_hypervolume_per_strategy(df, problem, objs_elements, pattern_template,
                                                                         figs, data['hv_per_strategy'])
         if self.config.print_sorted_contribution_per_strategy:
-            data['contribution_joint_front'] = self.analysis.get_contribution_to_joint_front_data(df, problem, objs_elements, pattern_template)
+            data['contribution_joint_front'] = self.analysis.get_contribution_to_joint_front_data(df, problem, objs_elements, pattern_template, True)
             figs = self.analysis.plot_normalized_contribution_per_strategy(df, problem, objs_elements, pattern_template,
                                                                        figs, data['contribution_joint_front'])
         if self.config.print_sorted_igd_per_strategy:
             data['igd'] = self.analysis.compute_igd_per_strategy(df, problem, objs_elements, pattern_template)
             figs = self.analysis.plot_igd_per_strategy(df, problem, objs_elements, pattern_template, figs, data['igd'])
         if self.config.print_sorted_igd_plus_per_strategy:
-            data['igd_plus'] = self.analysis.compute_igd_plus_per_strategy(df, problem, objs_elements, pattern_template)
+            data['igd_plus'] = self.analysis.compute_igd_plus_per_strategy(df, problem, objs_elements, pattern_template, True)
             figs = self.analysis.plot_igd_plus_per_strategy(df, problem, objs_elements, pattern_template, figs, data['igd_plus'])
         if self.config.print_sorted_normalized_time_per_strategy:
-            data['time_per_strategy'] = self.analysis.get_normalized_time_per_strategy_data(df, objs_elements, pattern_template)
+            data['time_per_strategy'] = self.analysis.get_normalized_time_per_strategy_data(df, objs_elements, pattern_template, True)
             figs = self.analysis.plot_normalized_time_per_strategy(df, problem, objs_elements, pattern_template,
                                                                    figs, data['time_per_strategy'], self.config.log_threshold)
 
@@ -4293,9 +4328,9 @@ class SaveAllResultsCP2025:
             # Remove title for paper version
             ax.set_title("")
 
-            # ax.set_xlabel("Instances", fontsize=18)
+            # ax.set_xlabel("Instance rank (per strategy)", fontsize=18)
             if plot_type is not None:
-                ax.set_xlabel("Instances")
+                ax.set_xlabel("Instance rank (per strategy)")
 
             # Enable grid with rcParams styling
             ax.grid(True, which='both')
