@@ -39,7 +39,7 @@ fi
 
 # I. Define the campaign to run.
 
-TIMEOUT=3600
+TIMEOUT=5400
 CORES=${SLURM_CPUS_PER_TASK:-16}               # Number of CPUs per task. Even if not all cores are used, we book the whole node to avoid possible interference.
 THREADS=1 # The number of threads used by the solver.
 TASKS_PER_NODE=${SLURM_NTASKS_PER_NODE:-16}   # Number of tasks per node
@@ -50,9 +50,10 @@ INSTANCES_PATH="$BENCHMARKS_DIR_PATH/benchmarking/mo_choco.csv"
 
 MEM_GB_PER_XP=32 # similar to Minizinc competition.
 # II. Prepare the command lines and output directory.
-VERSION="v4.10.14"
+VERSION="v5.0.0"
 SOLVER="choco-solver.org"
-SEARCH_STRATEGY="default"
+# The search strategy is always "domOverWDegSearch" unless specified, e.g: "minDomLBSearch"
+SEARCH_STRATEGY="domOverWDegSearch"
 CHOCO_MO_JAR_COMMAND="java -Xmx${MEM_GB_PER_XP}g -jar choco-mo.jar"
 OUTPUT_DIR="$BENCHMARKS_DIR_PATH/campaign/$MACHINE/mo/$SOLVER-$VERSION"
 mkdir -p "$OUTPUT_DIR"
