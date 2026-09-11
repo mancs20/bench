@@ -240,6 +240,9 @@ class MoAnalysis:
         self.stats_non_exhaustive = ["hypervolume", "front_cardinality", "exhaustive"]
         self.stats_non_exhaustive_pretty_name = ["Hyp", "Points", "Compl"]
 
+        # label axis y
+        self.use_normalized_in_axis_y = True
+
         # to store the front for each solver
         self._joint_front_cache = {}
 
@@ -264,6 +267,7 @@ class MoAnalysis:
         self.fixed_strategies = self.strategies.strategies_better_name
         self.strategy_colors = self.strategies.colors
         self.strategy_markers = self.strategies.markers
+        self.strategy_linestyles = self.strategies.linestyles
 
     def set_stats_non_exhaustive_for_metric(self, metric: str):
         """
@@ -2417,7 +2421,7 @@ class MoAnalysis:
                 local_counts[strategy] = completed
                 ax.plot(times_sorted, completed,
                         color=self.strategy_colors[strategy],
-                        linestyle='-', linewidth=1.5)
+                        linestyle=self.strategy_linestyles[strategy], linewidth=1.5)
                 ax.scatter(times_sorted, completed,
                            label=strategy,
                            edgecolor=self.strategy_colors[strategy],
@@ -2444,7 +2448,7 @@ class MoAnalysis:
             overall_counts[strategy] = completed
             ax.plot(times_sorted, completed,
                     color=self.strategy_colors[strategy],
-                    linestyle='-', linewidth=1.5)
+                    linestyle=self.strategy_linestyles[strategy], linewidth=1.5)
             ax.scatter(times_sorted, completed,
                        label=strategy,
                        edgecolor=self.strategy_colors[strategy],
@@ -2513,7 +2517,7 @@ class MoAnalysis:
                             label=strategy,
                             color=self.strategy_colors[strategy],
                             marker=self.strategy_markers[strategy],
-                            linestyle='None',
+                            linestyle=self.strategy_linestyles[strategy],
                             markersize=4,
                             markerfacecolor='none'
                         )
@@ -2569,7 +2573,7 @@ class MoAnalysis:
                         label=strategy,
                         color=self.strategy_colors[strategy],
                         marker=self.strategy_markers[strategy],
-                        linestyle='None',
+                        linestyle=self.strategy_linestyles[strategy],
                         markersize=4,
                         markerfacecolor='none'
                     )
@@ -2946,13 +2950,17 @@ class MoAnalysis:
                         label=strategy,
                         color=self.strategy_colors[strategy],
                         marker=self.strategy_markers[strategy],
-                        linestyle='-',
+                        linestyle=self.strategy_linestyles[strategy],
                         markersize=6,
                         markerfacecolor='none',  # Unfilled marker
                         linewidth=1.5)
 
-            self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized HV)",
-                                          ylabel="HV / best HV")
+            if self.use_normalized_in_axis_y:
+                self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized HV)",
+                                              ylabel="Normalized HV")
+            else:
+                self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized HV)",
+                                              ylabel="HV / best HV")
             figs[f"normalized_hv_sorted_per_instance_{problem_name}_{obj}obj"] = fig
             plt.show()
 
@@ -2971,13 +2979,17 @@ class MoAnalysis:
                     label=strategy,
                     color=self.strategy_colors[strategy],
                     marker=self.strategy_markers[strategy],
-                    linestyle='-',
+                    linestyle=self.strategy_linestyles[strategy],
                     markersize=6,
                     markerfacecolor='none',
                     linewidth=1.5)
 
-        self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized HV)",
-                                      ylabel="HV / best HV")
+        if self.use_normalized_in_axis_y:
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized HV)",
+                                          ylabel="Normalized HV")
+        else:
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized HV)",
+                                          ylabel="HV / best HV")
         figs[f"normalized_hv_sorted_per_instance_{problem_name}_all"] = fig
         plt.show()
 
@@ -3079,7 +3091,7 @@ class MoAnalysis:
                         label=strategy,
                         color=self.strategy_colors[strategy],
                         marker=self.strategy_markers[strategy],
-                        linestyle='-',
+                        linestyle=self.strategy_linestyles[strategy],
                         markersize=6,
                         markerfacecolor='none',  # Unfilled marker
                         linewidth=1.5)
@@ -3104,7 +3116,7 @@ class MoAnalysis:
                     label=strategy,
                     color=self.strategy_colors[strategy],
                     marker=self.strategy_markers[strategy],
-                    linestyle='-',
+                    linestyle=self.strategy_linestyles[strategy],
                     markersize=6,
                     markerfacecolor='none',
                     linewidth=1.5)
@@ -3235,7 +3247,7 @@ class MoAnalysis:
                         label=strategy,
                         color=self.strategy_colors[strategy],
                         marker=self.strategy_markers[strategy],
-                        linestyle='-',
+                        linestyle=self.strategy_linestyles[strategy],
                         markersize=6,
                         markerfacecolor='none',
                         linewidth=1.5)
@@ -3260,7 +3272,7 @@ class MoAnalysis:
                     label=strategy,
                     color=self.strategy_colors[strategy],
                     marker=self.strategy_markers[strategy],
-                    linestyle='-',
+                    linestyle=self.strategy_linestyles[strategy],
                     markersize=6,
                     markerfacecolor='none',
                     linewidth=1.5)
@@ -3383,7 +3395,7 @@ class MoAnalysis:
                         label=strategy,
                         color=self.strategy_colors[strategy],
                         marker=self.strategy_markers[strategy],
-                        linestyle='-',
+                        linestyle=self.strategy_linestyles[strategy],
                         markersize=6,
                         markerfacecolor='none',
                         linewidth=1.5)
@@ -3408,7 +3420,7 @@ class MoAnalysis:
                     label=strategy,
                     color=self.strategy_colors[strategy],
                     marker=self.strategy_markers[strategy],
-                    linestyle='-',
+                    linestyle=self.strategy_linestyles[strategy],
                     markersize=6,
                     markerfacecolor='none',
                     linewidth=1.5)
@@ -3621,15 +3633,20 @@ class MoAnalysis:
                         label=strategy,
                         color=self.strategy_colors[strategy],
                         marker=self.strategy_markers[strategy],
-                        linestyle='-',
+                        linestyle=self.strategy_linestyles[strategy],
                         markersize=6,
                         markerfacecolor='none',
                         linewidth=1.5)
 
             # log scale only if max/min >= log_threshold, and set readable ticks
             self.apply_y_scale_and_ticks(ax, all_vals, log_threshold=log_threshold)
-            self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized time)",
-                                          ylabel="Runtime / best runtime")
+            if self.use_normalized_in_axis_y:
+                self.finalize_plot_for_screen(fig, ax,
+                                              xlabel="Instance rank (per strategy) (sorted by normalized time)",
+                                              ylabel="Normalized time")
+            else:
+                self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized time)",
+                                              ylabel="Runtime / best runtime")
             figs[f"normalized_time_sorted_per_instance_{problem_name}_{obj}obj"] = fig
             plt.show()
 
@@ -3650,15 +3667,22 @@ class MoAnalysis:
                     label=strategy,
                     color=self.strategy_colors[strategy],
                     marker=self.strategy_markers[strategy],
-                    linestyle='-',
+                    linestyle=self.strategy_linestyles[strategy],
                     markersize=6,
                     markerfacecolor='none',
                     linewidth=1.5)
 
         # log scale only if max/min >= log_threshold, and set readable ticks
         self.apply_y_scale_and_ticks(ax, all_vals, log_threshold=log_threshold)
-        self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized time)",
-                                      ylabel="Runtime / best runtime")
+
+        if self.use_normalized_in_axis_y:
+            self.finalize_plot_for_screen(fig, ax,
+                                          xlabel="Instance rank (per strategy) (sorted by normalized time)",
+                                          ylabel="Normalized time")
+        else:
+            self.finalize_plot_for_screen(fig, ax, xlabel="Instance rank (per strategy) (sorted by normalized time)",
+                                          ylabel="Runtime / best runtime")
+
         figs[f"normalized_time_sorted_per_instance_{problem_name}_all"] = fig
         plt.show()
 
@@ -4291,9 +4315,15 @@ class SaveAllResultsCP2025:
         if figs:
             import os
             import matplotlib.pyplot as plt
+            import matplotlib.colors as mcolors
 
             output_dir = os.path.join(self.config.folder_path, problem)
             os.makedirs(output_dir, exist_ok=True)
+
+            def to_gray(color):
+                r, g, b = mcolors.to_rgb(color)
+                gray = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                return (gray, gray, gray)
 
             for name, fig in figs.items():
                 # Infer plot type from name
@@ -4318,6 +4348,21 @@ class SaveAllResultsCP2025:
                 else:
                     fig_path = os.path.join(output_dir, f"{name}.pdf")
                 fig.savefig(fig_path, format='pdf', bbox_inches='tight')
+
+                # save grayscale version for better visibility in printed papers
+                gray_dir = os.path.join(os.path.dirname(fig_path), "gray")
+                os.makedirs(gray_dir, exist_ok=True)
+                gray_fig_path = os.path.join(gray_dir, f"{name}.pdf")
+
+                for ax in fig.axes:
+                    for line in ax.get_lines():
+                        line.set_color(to_gray(line.get_color()))
+                        line.set_markeredgecolor(to_gray(line.get_markeredgecolor()))
+                        if line.get_markerfacecolor() != 'none':
+                            line.set_markerfacecolor(to_gray(line.get_markerfacecolor()))
+
+                fig.savefig(gray_fig_path, format='pdf', bbox_inches='tight')
+
                 plt.close(fig)  # optional: frees memory if you're done
             print(f"Saved {len(figs)} figures to '{output_dir}'")
         print("Creating plots done")
@@ -4701,12 +4746,17 @@ class Strategies:
         # keep your existing colors/markers logic (just keyed by label now)
         self.colors = self._build_colors(self.strategies_better_name)
         self.markers = self._build_markers(self.strategies_better_name)
+        self.linestyles = self._build_linestyles(self.strategies_better_name)
 
     def _build_colors(self, labels):
         return dict(zip(labels, sns.color_palette("colorblind", len(labels))))
 
     def _build_markers(self, labels):
         base = ['o', 's', '^', 'D', 'X', '*', 'P', 'v', '>', '<', 'h', 'H', 'd', '8', 'p']
+        return {lab: base[i % len(base)] for i, lab in enumerate(labels)}
+
+    def _build_linestyles(self, labels):
+        base = ['-', '--', '-.', ':']
         return {lab: base[i % len(base)] for i, lab in enumerate(labels)}
 
     def apply_specs(self, df, strategy_col="front_generator"):
