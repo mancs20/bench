@@ -38,7 +38,9 @@ if [ -z "$1" ]; then
   exit 1
 fi
 source $1
-source "${BENCHMARKS_DIR_PATH}"/../pybench/bin/activate
+module load env/development/2024a
+module load math/Gurobi/12.0.1-GCCcore-13.3.0   # Gurobi runs, SIU license server
+source "${BENCHMARKS_DIR_PATH}"/../pybench_gurobi/bin/activate
 
 # If it has an argument, we retry the jobs that failed on a previous run.
 RESUME_FLAG="--resume"
